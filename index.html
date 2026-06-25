@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Memorro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,600;1,300&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- CABECERA -->
+  <header class="app-header">
+    <span class="logo">Memorro</span>
+    <nav class="header-nav">
+      <button class="nav-btn active" data-view="repasar">Repasar</button>
+      <button class="nav-btn" data-view="tarjetas">Tarjetas</button>
+      <button class="nav-btn" data-view="nueva">+ Nueva</button>
+    </nav>
+  </header>
+
+  <!-- VISTA: REPASAR -->
+  <main id="view-repasar" class="view active">
+    <div id="repaso-vacio" class="estado-vacio" style="display:none;">
+      <p class="vacio-titulo">Sin tarjetas por repasar</p>
+      <p class="vacio-sub">Crea tu primera tarjeta o vuelve más tarde.</p>
+      <button class="btn-primario" data-view="nueva">Crear tarjeta</button>
+    </div>
+
+    <div id="repaso-activo">
+      <div class="progreso-barra-wrap">
+        <div class="progreso-barra" id="progreso-barra"></div>
+      </div>
+      <p class="progreso-texto" id="progreso-texto"></p>
+
+      <div class="tarjeta-escena" id="tarjeta-escena">
+        <div class="tarjeta" id="tarjeta">
+          <div class="tarjeta-cara tarjeta-frente">
+            <span class="cara-label">Pregunta</span>
+            <p id="texto-frente" class="tarjeta-texto"></p>
+          </div>
+          <div class="tarjeta-cara tarjeta-dorso">
+            <span class="cara-label">Respuesta</span>
+            <p id="texto-dorso" class="tarjeta-texto"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="acciones-repaso" id="acciones-repaso">
+        <button class="btn-voltear" id="btn-voltear">Voltear</button>
+        <div class="btns-calificacion" id="btns-calificacion" style="display:none;">
+          <button class="btn-cal btn-mal" data-cal="1">Mal</button>
+          <button class="btn-cal btn-regular" data-cal="2">Regular</button>
+          <button class="btn-cal btn-bien" data-cal="3">Bien</button>
+          <button class="btn-cal btn-perfecto" data-cal="4">Perfecto</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- VISTA: LISTA DE TARJETAS -->
+  <main id="view-tarjetas" class="view">
+    <div class="view-header">
+      <h2 class="view-titulo">Mis tarjetas</h2>
+      <input type="text" id="buscador" class="buscador" placeholder="Buscar…" />
+    </div>
+    <div id="lista-tarjetas" class="lista-tarjetas"></div>
+    <div id="lista-vacia" class="estado-vacio" style="display:none;">
+      <p class="vacio-titulo">Aún no hay tarjetas</p>
+      <p class="vacio-sub">Empieza creando tu primera tarjeta.</p>
+    </div>
+  </main>
+
+  <!-- VISTA: NUEVA / EDITAR TARJETA -->
+  <main id="view-nueva" class="view">
+    <div class="view-header">
+      <h2 class="view-titulo" id="form-titulo">Nueva tarjeta</h2>
+    </div>
+    <div class="formulario">
+      <label class="campo-label" for="input-frente">Pregunta (frente)</label>
+      <textarea id="input-frente" class="campo-texto" rows="4" placeholder="Escribe la palabra o expresión…"></textarea>
+
+      <label class="campo-label" for="input-dorso">Respuesta (dorso)</label>
+      <textarea id="input-dorso" class="campo-texto" rows="4" placeholder="Escribe la traducción o definición…"></textarea>
+
+      <div class="formulario-acciones">
+        <button class="btn-secundario" id="btn-cancelar">Cancelar</button>
+        <button class="btn-primario" id="btn-guardar">Guardar tarjeta</button>
+      </div>
+      <p class="form-error" id="form-error"></p>
+    </div>
+  </main>
+
+  <!-- MODAL CONFIRMAR BORRADO -->
+  <div class="modal-overlay" id="modal-overlay" style="display:none;">
+    <div class="modal">
+      <p class="modal-texto">¿Eliminar esta tarjeta?</p>
+      <div class="modal-acciones">
+        <button class="btn-secundario" id="modal-cancelar">Cancelar</button>
+        <button class="btn-peligro" id="modal-confirmar">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>

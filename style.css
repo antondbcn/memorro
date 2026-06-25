@@ -1,0 +1,458 @@
+/* =============================================
+   MEMORRO — style.css
+   Paleta: fondo arena oscuro, acento añil, texto crema
+   Tipografía: Fraunces (display) + DM Sans (UI)
+   ============================================= */
+
+/* --- TOKENS --- */
+:root {
+  --bg:         #1a1814;
+  --bg-card:    #242018;
+  --bg-surface: #2e2920;
+  --border:     #3d3628;
+  --text:       #f0e8d8;
+  --text-muted: #8a7f6e;
+  --accent:     #5b7fa6;
+  --accent-h:   #7099c0;
+  --mal:        #a65b5b;
+  --regular:    #a68a3a;
+  --bien:       #5b8a5b;
+  --perfecto:   #5b7fa6;
+  --radius:     12px;
+  --radius-sm:  6px;
+  --shadow:     0 4px 24px rgba(0,0,0,0.4);
+  --trans:      0.18s ease;
+}
+
+/* --- RESET --- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 16px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- CABECERA --- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  height: 60px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.logo {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 1.4rem;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.header-nav {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.nav-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--trans), background var(--trans);
+}
+.nav-btn:hover { color: var(--text); background: var(--bg-surface); }
+.nav-btn.active { color: var(--text); background: var(--bg-surface); }
+
+/* --- VISTAS --- */
+.view {
+  display: none;
+  flex: 1;
+  padding: 2rem 1.5rem;
+  max-width: 680px;
+  margin: 0 auto;
+  width: 100%;
+}
+.view.active { display: block; }
+
+.view-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  gap: 1rem;
+}
+
+.view-titulo {
+  font-family: 'Fraunces', serif;
+  font-weight: 300;
+  font-size: 1.6rem;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+/* --- ESTADO VACÍO --- */
+.estado-vacio {
+  text-align: center;
+  padding: 4rem 1rem;
+}
+.vacio-titulo {
+  font-family: 'Fraunces', serif;
+  font-style: italic;
+  font-size: 1.4rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+.vacio-sub {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+/* --- BARRA DE PROGRESO --- */
+.progreso-barra-wrap {
+  height: 3px;
+  background: var(--border);
+  border-radius: 99px;
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+.progreso-barra {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.4s ease;
+  width: 0%;
+}
+.progreso-texto {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: right;
+  margin-bottom: 1.5rem;
+}
+
+/* --- TARJETA (flip) --- */
+.tarjeta-escena {
+  perspective: 1200px;
+  margin: 0 auto 1.5rem;
+  width: 100%;
+  max-width: 520px;
+  height: 260px;
+  cursor: pointer;
+}
+
+.tarjeta {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.tarjeta.volteada { transform: rotateY(180deg); }
+
+.tarjeta-cara {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  box-shadow: var(--shadow);
+}
+.tarjeta-dorso { transform: rotateY(180deg); }
+
+.cara-label {
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.tarjeta-texto {
+  font-family: 'Fraunces', serif;
+  font-size: 1.5rem;
+  font-weight: 300;
+  text-align: center;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+/* --- ACCIONES REPASO --- */
+.acciones-repaso {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.btn-voltear {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.65rem 2rem;
+  cursor: pointer;
+  transition: background var(--trans), transform var(--trans);
+}
+.btn-voltear:hover { background: var(--accent-h); transform: translateY(-1px); }
+
+.btns-calificacion {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn-cal {
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 500;
+  padding: 0.55rem 1.1rem;
+  cursor: pointer;
+  color: #fff;
+  transition: opacity var(--trans), transform var(--trans);
+}
+.btn-cal:hover { opacity: 0.85; transform: translateY(-1px); }
+.btn-mal      { background: var(--mal); }
+.btn-regular  { background: var(--regular); }
+.btn-bien     { background: var(--bien); }
+.btn-perfecto { background: var(--perfecto); }
+
+/* --- BUSCADOR --- */
+.buscador {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  outline: none;
+  width: 180px;
+  transition: border-color var(--trans);
+}
+.buscador:focus { border-color: var(--accent); }
+.buscador::placeholder { color: var(--text-muted); }
+
+/* --- LISTA DE TARJETAS --- */
+.lista-tarjetas {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.item-tarjeta {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  transition: border-color var(--trans);
+}
+.item-tarjeta:hover { border-color: var(--accent); }
+
+.item-textos { flex: 1; min-width: 0; }
+.item-frente {
+  font-weight: 500;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-dorso {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 0.2rem;
+}
+.item-nivel {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.item-acciones {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.btn-icono {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  transition: color var(--trans), border-color var(--trans);
+}
+.btn-icono:hover { color: var(--text); border-color: var(--text-muted); }
+.btn-icono.eliminar:hover { color: var(--mal); border-color: var(--mal); }
+
+/* --- FORMULARIO --- */
+.formulario {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 520px;
+}
+
+.campo-label {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-top: 0.8rem;
+}
+
+.campo-texto {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1rem;
+  padding: 0.75rem 1rem;
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--trans);
+}
+.campo-texto:focus { border-color: var(--accent); }
+.campo-texto::placeholder { color: var(--text-muted); }
+
+.formulario-acciones {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  justify-content: flex-end;
+}
+
+.form-error {
+  font-size: 0.85rem;
+  color: var(--mal);
+  min-height: 1.2em;
+}
+
+/* --- BOTONES GENÉRICOS --- */
+.btn-primario {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.6rem 1.4rem;
+  cursor: pointer;
+  transition: background var(--trans), transform var(--trans);
+}
+.btn-primario:hover { background: var(--accent-h); transform: translateY(-1px); }
+
+.btn-secundario {
+  background: none;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.6rem 1.2rem;
+  cursor: pointer;
+  transition: color var(--trans), border-color var(--trans);
+}
+.btn-secundario:hover { color: var(--text); border-color: var(--text-muted); }
+
+.btn-peligro {
+  background: var(--mal);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  padding: 0.6rem 1.4rem;
+  cursor: pointer;
+  transition: opacity var(--trans);
+}
+.btn-peligro:hover { opacity: 0.85; }
+
+/* --- MODAL --- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: var(--shadow);
+}
+
+.modal-texto {
+  font-family: 'Fraunces', serif;
+  font-size: 1.2rem;
+  font-weight: 300;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.modal-acciones {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* --- RESPONSIVE --- */
+@media (max-width: 520px) {
+  .app-header { padding: 0 1rem; }
+  .logo { font-size: 1.1rem; }
+  .nav-btn { padding: 0.35rem 0.6rem; font-size: 0.82rem; }
+  .view { padding: 1.5rem 1rem; }
+  .tarjeta-escena { height: 220px; }
+  .tarjeta-texto { font-size: 1.2rem; }
+  .btns-calificacion { gap: 0.4rem; }
+  .btn-cal { padding: 0.5rem 0.8rem; font-size: 0.82rem; }
+}
