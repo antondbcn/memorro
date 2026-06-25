@@ -89,6 +89,13 @@
         <button class="btn-primario" id="btn-guardar">Guardar tarjeta</button>
       </div>
       <p class="form-error" id="form-error"></p>
+
+      <div class="import-wrap">
+        <span class="import-label">¿Tienes muchas tarjetas? Importa un CSV:</span>
+        <button class="btn-secundario" id="btn-importar">Importar CSV…</button>
+        <input type="file" id="input-csv" accept=".csv,text/csv" />
+      </div>
+      <p class="import-resultado" id="import-resultado"></p>
     </div>
   </main>
 
@@ -99,6 +106,19 @@
       <div class="modal-acciones">
         <button class="btn-secundario" id="modal-cancelar">Cancelar</button>
         <button class="btn-peligro" id="modal-confirmar">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL DUPLICADOS FUZZY -->
+  <div class="modal-overlay" id="modal-duplicados" style="display:none;">
+    <div class="modal modal-lg">
+      <p class="modal-texto">Posibles duplicados detectados</p>
+      <p class="dup-aviso">Estas entradas son muy similares a tarjetas que ya tienes. ¿Qué quieres hacer con ellas?</p>
+      <div class="dup-lista" id="dup-lista"></div>
+      <div class="modal-acciones">
+        <button class="btn-secundario" id="dup-omitir">Omitirlas</button>
+        <button class="btn-primario"   id="dup-incluir">Incluirlas igual</button>
       </div>
     </div>
   </div>

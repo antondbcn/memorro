@@ -34,8 +34,8 @@ const COL = "tarjetas";
 //  ALGORITMO SM-2 SIMPLIFICADO
 //  calidad: 1=Mal, 2=Regular, 3=Bien, 4=Perfecto
 // =============================================
-function calcularRepaso(estado, calidad) {
-  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = estado;
+function calcularRepaso(tarjeta, calidad) {
+  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = tarjeta;
 
   if (calidad < 2) {
     // Mal: reiniciar
@@ -56,13 +56,13 @@ function calcularRepaso(estado, calidad) {
   return { intervalo, repeticiones, facilidad, ultimoRepaso: ahora, proximoRepaso: proxima };
 }
 
-function esDebida(estado) {
-  if (!estado.proximoRepaso) return true;
-  return Date.now() >= estado.proximoRepaso;
+function esDebida(tarjeta) {
+  if (!tarjeta.proximoRepaso) return true;
+  return Date.now() >= tarjeta.proximoRepaso;
 }
 
-function nivelTexto(estado) {
-  const r = estado.repeticiones || 0;
+function nivelTexto(tarjeta) {
+  const r = tarjeta.repeticiones || 0;
   if (r === 0) return "Nueva";
   if (r === 1) return "Aprendiendo";
   if (r < 4)  return "Progresando";
@@ -89,12 +89,10 @@ async function cargarTarjetas() {
 }
 
 async function guardarTarjeta(frente, dorso) {
-  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
-                          ultimoRepaso: null, proximoRepaso: null };
   const nueva = {
     frente, dorso,
-    fd: { ...estadoInicial },
-    df: { ...estadoInicial },
+    intervalo: 1, repeticiones: 0, facilidad: 2.5,
+    ultimoRepaso: null, proximoRepaso: null,
     creadaEn: Date.now()
   };
   const ref = await addDoc(collection(db, COL), nueva);
@@ -131,21 +129,7 @@ function mostrarVista(nombre) {
 //  VISTA: REPASAR
 // =============================================
 function iniciarRepaso() {
-  // Cada tarjeta genera hasta dos items: fd (frente→dorso) y df (dorso→frente)
-  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
-                          ultimoRepaso: null, proximoRepaso: null };
-  colaRepaso = [];
-  todasTarjetas.forEach(t => {
-    const fd = t.fd || { ...estadoInicial };
-    const df = t.df || { ...estadoInicial };
-    if (esDebida(fd)) colaRepaso.push({ ...t, _dir: "fd", _estado: fd });
-    if (esDebida(df)) colaRepaso.push({ ...t, _dir: "df", _estado: df });
-  });
-  // Mezclar para que no salgan siempre juntas las dos caras de la misma tarjeta
-  for (let i = colaRepaso.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [colaRepaso[i], colaRepaso[j]] = [colaRepaso[j], colaRepaso[i]];
-  }
+  colaRepaso = todasTarjetas.filter(esDebida);
   indiceActual = 0;
 
   if (colaRepaso.length === 0) {
@@ -167,11 +151,8 @@ function mostrarTarjetaActual() {
     `${indiceActual} de ${total}`;
 
   const t = colaRepaso[indiceActual];
-  // fd → pregunta=frente, respuesta=dorso  |  df → pregunta=dorso, respuesta=frente
-  const pregunta  = t._dir === "fd" ? t.frente : t.dorso;
-  const respuesta = t._dir === "fd" ? t.dorso  : t.frente;
-  document.getElementById("texto-frente").textContent = pregunta;
-  document.getElementById("texto-dorso").textContent  = respuesta;
+  document.getElementById("texto-frente").textContent = t.frente;
+  document.getElementById("texto-dorso").textContent  = t.dorso;
 
   // Resetear estado visual
   volteada = false;
@@ -193,28 +174,36 @@ function voltearTarjeta() {
 }
 
 async function calificar(calidad) {
-  const t      = colaRepaso[indiceActual];
-  const nuevos = calcularRepaso(t._estado, calidad);
-  // Actualizar solo el subobjeto correspondiente (fd o df) en Firestore
-  await actualizarTarjeta(t.id, { [t._dir]: nuevos });
+  const t = colaRepaso[indiceActual];
+  const datos = calcularRepaso(t, calidad);
+  await actualizarTarjeta(t.id, datos);
 
   indiceActual++;
-  if (indiceActual >= colaRepaso.length) {
-    // Sesión completada
-    document.getElementById("progreso-barra").style.width = "100%";
-    document.getElementById("progreso-texto").textContent = "¡Sesión completada!";
-    document.getElementById("tarjeta-escena").style.display = "none";
-    document.getElementById("acciones-repaso").style.display = "none";
 
-    // Mostrar mensaje
-    const wrap = document.getElementById("repaso-activo");
-    const msg  = document.createElement("p");
-    msg.className = "vacio-titulo";
-    msg.style.marginTop = "2rem";
-    msg.textContent = "¡Has repasado todas las tarjetas de hoy!";
-    wrap.appendChild(msg);
+  const escena = document.getElementById("tarjeta-escena");
+
+  if (indiceActual >= colaRepaso.length) {
+    // Fade out y luego mostrar fin de sesión
+    escena.classList.add("fadout");
+    setTimeout(() => {
+      document.getElementById("progreso-barra").style.width = "100%";
+      document.getElementById("progreso-texto").textContent = "¡Sesión completada!";
+      escena.style.display = "none";
+      document.getElementById("acciones-repaso").style.display = "none";
+      const wrap = document.getElementById("repaso-activo");
+      const msg  = document.createElement("p");
+      msg.className = "vacio-titulo";
+      msg.style.marginTop = "2rem";
+      msg.textContent = "¡Has repasado todas las tarjetas de hoy!";
+      wrap.appendChild(msg);
+    }, 200);
   } else {
-    mostrarTarjetaActual();
+    // Fade out → actualizar contenido → fade in
+    escena.classList.add("fadout");
+    setTimeout(() => {
+      mostrarTarjetaActual();          // actualiza textos con la tarjeta ya en posición frente
+      escena.classList.remove("fadout");
+    }, 200);
   }
 }
 
@@ -239,11 +228,6 @@ function renderLista(filtro = "") {
   vacia.style.display = "none";
 
   filtradas.forEach(t => {
-    const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
-                            ultimoRepaso: null, proximoRepaso: null };
-    const fd = t.fd || { ...estadoInicial };
-    const df = t.df || { ...estadoInicial };
-    const nivel = `fd: ${nivelTexto(fd)} · df: ${nivelTexto(df)}`;
     const item = document.createElement("div");
     item.className = "item-tarjeta";
     item.innerHTML = `
@@ -251,7 +235,7 @@ function renderLista(filtro = "") {
         <div class="item-frente">${escHtml(t.frente)}</div>
         <div class="item-dorso">${escHtml(t.dorso)}</div>
       </div>
-      <span class="item-nivel">${nivel}</span>
+      <span class="item-nivel">${nivelTexto(t)}</span>
       <div class="item-acciones">
         <button class="btn-icono editar" data-id="${t.id}">Editar</button>
         <button class="btn-icono eliminar" data-id="${t.id}">Borrar</button>
@@ -342,6 +326,184 @@ async function confirmarBorrado() {
 }
 
 // =============================================
+//  IMPORTACIÓN CSV
+//  Formato esperado: dos columnas (frente,dorso)
+//  con o sin cabecera, delimitador , o ;
+// =============================================
+
+// Normaliza un texto para comparación: minúsculas, sin acentos, sin espacios extra
+function normalizar(s) {
+  return s.trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+// Distancia de Levenshtein (para fuzzy matching)
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+function similitud(a, b) {
+  const na = normalizar(a), nb = normalizar(b);
+  if (na === nb) return 1;
+  const maxLen = Math.max(na.length, nb.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshtein(na, nb) / maxLen;
+}
+
+// Parsea CSV simple (coma o punto y coma, respeta comillas dobles)
+function parsearCSV(texto) {
+  const sep = texto.includes(";") && !texto.includes(",") ? ";" : ",";
+  const lineas = texto.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  const filas = [];
+  for (const linea of lineas) {
+    if (!linea.trim()) continue;
+    // Split respetando comillas dobles
+    const cols = [];
+    let cur = "", dentro = false;
+    for (let i = 0; i < linea.length; i++) {
+      const c = linea[i];
+      if (c === '"') { dentro = !dentro; continue; }
+      if (c === sep && !dentro) { cols.push(cur.trim()); cur = ""; continue; }
+      cur += c;
+    }
+    cols.push(cur.trim());
+    if (cols.length >= 2) filas.push(cols);
+  }
+  return filas;
+}
+
+// Estado temporal de importación
+let pendientesImportar = []; // tarjetas limpias a insertar
+let duplicadosFuzzy    = []; // { nueva, existente, sim }
+
+function onArchivoCSV(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = ""; // reset para permitir reimportar el mismo fichero
+
+  const reader = new FileReader();
+  reader.onload = ev => procesarCSV(ev.target.result);
+  reader.readAsText(file, "UTF-8");
+}
+
+function procesarCSV(texto) {
+  // Quitar BOM si existe
+  const contenido = texto.replace(/^\uFEFF/, "");
+  const filas = parsearCSV(contenido);
+
+  if (filas.length === 0) {
+    mostrarResultadoImport("El fichero está vacío o no tiene el formato correcto.", true);
+    return;
+  }
+
+  // Detectar si la primera fila es cabecera (ninguna celda coincide con tarjetas existentes
+  // y parece texto genérico: "frente","alemán","front","palabra", etc.)
+  const palabrasCabecera = ["frente","dorso","front","back","alemán","español",
+                            "german","spanish","palabra","traduccion","traducción","question","answer"];
+  let inicio = 0;
+  const primeraFila0 = normalizar(filas[0][0]);
+  if (palabrasCabecera.some(p => primeraFila0.includes(p))) inicio = 1;
+
+  const nuevas = filas.slice(inicio).map(f => ({
+    frente: f[0].trim(),
+    dorso:  f[1].trim()
+  })).filter(t => t.frente && t.dorso);
+
+  if (nuevas.length === 0) {
+    mostrarResultadoImport("No se encontraron entradas válidas.", true);
+    return;
+  }
+
+  // --- DEDUPLICACIÓN ---
+  const exactas   = new Set(todasTarjetas.map(t => normalizar(t.frente)));
+  pendientesImportar = [];
+  duplicadosFuzzy    = [];
+
+  for (const nueva of nuevas) {
+    const normNueva = normalizar(nueva.frente);
+
+    // 1. Duplicado exacto → descartar silenciosamente
+    if (exactas.has(normNueva)) continue;
+
+    // 2. Fuzzy: buscar la tarjeta existente más parecida
+    let maxSim = 0, masParecida = null;
+    for (const existente of todasTarjetas) {
+      const s = similitud(nueva.frente, existente.frente);
+      if (s > maxSim) { maxSim = s; masParecida = existente; }
+    }
+
+    if (maxSim >= 0.85 && masParecida) {
+      duplicadosFuzzy.push({ nueva, existente: masParecida, sim: maxSim });
+    } else {
+      pendientesImportar.push(nueva);
+    }
+  }
+
+  if (duplicadosFuzzy.length > 0) {
+    // Mostrar modal de revisión
+    mostrarModalDuplicados();
+  } else {
+    ejecutarImportacion();
+  }
+}
+
+function mostrarModalDuplicados() {
+  const lista = document.getElementById("dup-lista");
+  lista.innerHTML = "";
+  for (const { nueva, existente } of duplicadosFuzzy) {
+    const item = document.createElement("div");
+    item.className = "dup-item";
+    item.innerHTML = `
+      <strong>${escHtml(nueva.frente)}</strong> → ${escHtml(nueva.dorso)}<br>
+      <span>Similar a: <em>${escHtml(existente.frente)}</em> → ${escHtml(existente.dorso)}</span>
+    `;
+    lista.appendChild(item);
+  }
+  document.getElementById("modal-duplicados").style.display = "flex";
+}
+
+async function ejecutarImportacion(incluirFuzzy = false) {
+  const aCargear = incluirFuzzy
+    ? [...pendientesImportar, ...duplicadosFuzzy.map(d => d.nueva)]
+    : pendientesImportar;
+
+  if (aCargear.length === 0) {
+    mostrarResultadoImport("No hay tarjetas nuevas que importar.");
+    return;
+  }
+
+  try {
+    for (const t of aCargear) {
+      await guardarTarjeta(t.frente, t.dorso);
+    }
+    const omitidas = duplicadosFuzzy.length - (incluirFuzzy ? 0 : duplicadosFuzzy.length);
+    const msg = `✓ ${aCargear.length} tarjeta${aCargear.length !== 1 ? "s" : ""} importada${aCargear.length !== 1 ? "s" : ""}` +
+      (omitidas > 0 ? ` · ${omitidas} omitida${omitidas !== 1 ? "s" : ""} por similitud` : "");
+    mostrarResultadoImport(msg);
+  } catch(e) {
+    mostrarResultadoImport("Error al guardar en la base de datos.", true);
+    console.error(e);
+  }
+}
+
+function mostrarResultadoImport(msg, esError = false) {
+  const el = document.getElementById("import-resultado");
+  el.textContent = msg;
+  el.className = "import-resultado" + (esError ? " error" : "");
+  setTimeout(() => { el.textContent = ""; el.className = "import-resultado"; }, 5000);
+}
+
+// =============================================
 //  EVENTOS
 // =============================================
 function bindEventos() {
@@ -373,11 +535,33 @@ function bindEventos() {
     mostrarVista(editandoId ? "tarjetas" : "repasar")
   );
 
-  // Modal
+  // Modal borrado
   document.getElementById("modal-cancelar").addEventListener("click", cerrarModal);
   document.getElementById("modal-confirmar").addEventListener("click", confirmarBorrado);
   document.getElementById("modal-overlay").addEventListener("click", e => {
     if (e.target === document.getElementById("modal-overlay")) cerrarModal();
+  });
+
+  // Importación CSV
+  document.getElementById("btn-importar").addEventListener("click", () =>
+    document.getElementById("input-csv").click()
+  );
+  document.getElementById("input-csv").addEventListener("change", onArchivoCSV);
+
+  // Modal duplicados fuzzy
+  document.getElementById("dup-omitir").addEventListener("click", () => {
+    document.getElementById("modal-duplicados").style.display = "none";
+    ejecutarImportacion(false);
+  });
+  document.getElementById("dup-incluir").addEventListener("click", () => {
+    document.getElementById("modal-duplicados").style.display = "none";
+    ejecutarImportacion(true);
+  });
+  document.getElementById("modal-duplicados").addEventListener("click", e => {
+    if (e.target === document.getElementById("modal-duplicados")) {
+      document.getElementById("modal-duplicados").style.display = "none";
+      ejecutarImportacion(false);
+    }
   });
 }
 
