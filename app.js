@@ -34,8 +34,8 @@ const COL = "tarjetas";
 //  ALGORITMO SM-2 SIMPLIFICADO
 //  calidad: 1=Mal, 2=Regular, 3=Bien, 4=Perfecto
 // =============================================
-function calcularRepaso(tarjeta, calidad) {
-  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = tarjeta;
+function calcularRepaso(estado, calidad) {
+  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = estado;
 
   if (calidad < 2) {
     // Mal: reiniciar
@@ -56,13 +56,13 @@ function calcularRepaso(tarjeta, calidad) {
   return { intervalo, repeticiones, facilidad, ultimoRepaso: ahora, proximoRepaso: proxima };
 }
 
-function esDebida(tarjeta) {
-  if (!tarjeta.proximoRepaso) return true;
-  return Date.now() >= tarjeta.proximoRepaso;
+function esDebida(estado) {
+  if (!estado.proximoRepaso) return true;
+  return Date.now() >= estado.proximoRepaso;
 }
 
-function nivelTexto(tarjeta) {
-  const r = tarjeta.repeticiones || 0;
+function nivelTexto(estado) {
+  const r = estado.repeticiones || 0;
   if (r === 0) return "Nueva";
   if (r === 1) return "Aprendiendo";
   if (r < 4)  return "Progresando";
@@ -89,10 +89,12 @@ async function cargarTarjetas() {
 }
 
 async function guardarTarjeta(frente, dorso) {
+  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
+                          ultimoRepaso: null, proximoRepaso: null };
   const nueva = {
     frente, dorso,
-    intervalo: 1, repeticiones: 0, facilidad: 2.5,
-    ultimoRepaso: null, proximoRepaso: null,
+    fd: { ...estadoInicial },
+    df: { ...estadoInicial },
     creadaEn: Date.now()
   };
   const ref = await addDoc(collection(db, COL), nueva);
@@ -129,7 +131,21 @@ function mostrarVista(nombre) {
 //  VISTA: REPASAR
 // =============================================
 function iniciarRepaso() {
-  colaRepaso = todasTarjetas.filter(esDebida);
+  // Cada tarjeta genera hasta dos items: fd (frente→dorso) y df (dorso→frente)
+  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
+                          ultimoRepaso: null, proximoRepaso: null };
+  colaRepaso = [];
+  todasTarjetas.forEach(t => {
+    const fd = t.fd || { ...estadoInicial };
+    const df = t.df || { ...estadoInicial };
+    if (esDebida(fd)) colaRepaso.push({ ...t, _dir: "fd", _estado: fd });
+    if (esDebida(df)) colaRepaso.push({ ...t, _dir: "df", _estado: df });
+  });
+  // Mezclar para que no salgan siempre juntas las dos caras de la misma tarjeta
+  for (let i = colaRepaso.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [colaRepaso[i], colaRepaso[j]] = [colaRepaso[j], colaRepaso[i]];
+  }
   indiceActual = 0;
 
   if (colaRepaso.length === 0) {
@@ -151,8 +167,11 @@ function mostrarTarjetaActual() {
     `${indiceActual} de ${total}`;
 
   const t = colaRepaso[indiceActual];
-  document.getElementById("texto-frente").textContent = t.frente;
-  document.getElementById("texto-dorso").textContent  = t.dorso;
+  // fd → pregunta=frente, respuesta=dorso  |  df → pregunta=dorso, respuesta=frente
+  const pregunta  = t._dir === "fd" ? t.frente : t.dorso;
+  const respuesta = t._dir === "fd" ? t.dorso  : t.frente;
+  document.getElementById("texto-frente").textContent = pregunta;
+  document.getElementById("texto-dorso").textContent  = respuesta;
 
   // Resetear estado visual
   volteada = false;
@@ -174,9 +193,10 @@ function voltearTarjeta() {
 }
 
 async function calificar(calidad) {
-  const t = colaRepaso[indiceActual];
-  const datos = calcularRepaso(t, calidad);
-  await actualizarTarjeta(t.id, datos);
+  const t      = colaRepaso[indiceActual];
+  const nuevos = calcularRepaso(t._estado, calidad);
+  // Actualizar solo el subobjeto correspondiente (fd o df) en Firestore
+  await actualizarTarjeta(t.id, { [t._dir]: nuevos });
 
   indiceActual++;
   if (indiceActual >= colaRepaso.length) {
@@ -219,6 +239,11 @@ function renderLista(filtro = "") {
   vacia.style.display = "none";
 
   filtradas.forEach(t => {
+    const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5,
+                            ultimoRepaso: null, proximoRepaso: null };
+    const fd = t.fd || { ...estadoInicial };
+    const df = t.df || { ...estadoInicial };
+    const nivel = `fd: ${nivelTexto(fd)} · df: ${nivelTexto(df)}`;
     const item = document.createElement("div");
     item.className = "item-tarjeta";
     item.innerHTML = `
@@ -226,7 +251,7 @@ function renderLista(filtro = "") {
         <div class="item-frente">${escHtml(t.frente)}</div>
         <div class="item-dorso">${escHtml(t.dorso)}</div>
       </div>
-      <span class="item-nivel">${nivelTexto(t)}</span>
+      <span class="item-nivel">${nivel}</span>
       <div class="item-acciones">
         <button class="btn-icono editar" data-id="${t.id}">Editar</button>
         <button class="btn-icono eliminar" data-id="${t.id}">Borrar</button>
