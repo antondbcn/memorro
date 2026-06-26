@@ -34,8 +34,9 @@ const COL = "tarjetas";
 //  ALGORITMO SM-2 SIMPLIFICADO
 //  calidad: 1=Mal, 2=Regular, 3=Bien, 4=Perfecto
 // =============================================
-function calcularRepaso(tarjeta, calidad) {
-  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = tarjeta;
+// Calcula el nuevo estado SM-2 a partir de un subobjeto de estado {intervalo, repeticiones, facilidad, ...}
+function calcularRepaso(estado, calidad) {
+  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = estado;
 
   if (calidad < 2) {
     // Mal: reiniciar
@@ -56,13 +57,33 @@ function calcularRepaso(tarjeta, calidad) {
   return { intervalo, repeticiones, facilidad, ultimoRepaso: ahora, proximoRepaso: proxima };
 }
 
-function esDebida(tarjeta) {
-  if (!tarjeta.proximoRepaso) return true;
-  return Date.now() >= tarjeta.proximoRepaso;
+// Devuelve el subobjeto SM-2 de una tarjeta para la dirección dada,
+// con compatibilidad hacia atrás para tarjetas antiguas (sin fd/df).
+function estadoDir(tarjeta, dir) {
+  if (tarjeta[dir]) return tarjeta[dir];
+  // Tarjeta antigua: usar los campos raíz como estado inicial de fd
+  if (dir === "fd") {
+    return {
+      intervalo:     tarjeta.intervalo     ?? 1,
+      repeticiones:  tarjeta.repeticiones  ?? 0,
+      facilidad:     tarjeta.facilidad     ?? 2.5,
+      ultimoRepaso:  tarjeta.ultimoRepaso  ?? null,
+      proximoRepaso: tarjeta.proximoRepaso ?? null,
+    };
+  }
+  // df de tarjeta antigua: empieza desde cero
+  return { intervalo: 1, repeticiones: 0, facilidad: 2.5, ultimoRepaso: null, proximoRepaso: null };
+}
+
+function esDirDebida(tarjeta, dir) {
+  const e = estadoDir(tarjeta, dir);
+  if (!e.proximoRepaso) return true;
+  return Date.now() >= e.proximoRepaso;
 }
 
 function nivelTexto(tarjeta) {
-  const r = tarjeta.repeticiones || 0;
+  // Muestra el nivel basado en fd con compatibilidad hacia atrás
+  const r = (tarjeta.fd?.repeticiones ?? tarjeta.repeticiones) || 0;
   if (r === 0) return "Nueva";
   if (r === 1) return "Aprendiendo";
   if (r < 4)  return "Progresando";
@@ -89,10 +110,11 @@ async function cargarTarjetas() {
 }
 
 async function guardarTarjeta(frente, dorso) {
+  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5, ultimoRepaso: null, proximoRepaso: null };
   const nueva = {
     frente, dorso,
-    intervalo: 1, repeticiones: 0, facilidad: 2.5,
-    ultimoRepaso: null, proximoRepaso: null,
+    fd: { ...estadoInicial },  // estado SM-2 dirección frente→dorso
+    df: { ...estadoInicial },  // estado SM-2 dirección dorso→frente
     creadaEn: Date.now()
   };
   const ref = await addDoc(collection(db, COL), nueva);
@@ -128,8 +150,41 @@ function mostrarVista(nombre) {
 // =============================================
 //  VISTA: REPASAR
 // =============================================
+// Mezcla un array de entradas {tarjeta, dir} evitando que dos entradas
+// de la misma tarjeta aparezcan seguidas.
+function mezclarSinConsecutivos(arr) {
+  // Fisher-Yates shuffle
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  // Reordenar para evitar consecutivos con mismo id
+  for (let i = 1; i < a.length; i++) {
+    if (a[i].tarjeta.id === a[i - 1].tarjeta.id) {
+      // Buscar el siguiente elemento con id distinto para intercambiar
+      for (let j = i + 1; j < a.length; j++) {
+        if (a[j].tarjeta.id !== a[i - 1].tarjeta.id) {
+          [a[i], a[j]] = [a[j], a[i]];
+          break;
+        }
+      }
+    }
+  }
+  return a;
+}
+
 function iniciarRepaso() {
-  colaRepaso = todasTarjetas.filter(esDebida);
+  // Construir cola bidireccional: una entrada por cada dirección debida
+  // Formato de cada entrada: { tarjeta, dir }  donde dir = "fd" | "df"
+  const entradas = [];
+  for (const t of todasTarjetas) {
+    if (esDirDebida(t, "fd")) entradas.push({ tarjeta: t, dir: "fd" });
+    if (esDirDebida(t, "df")) entradas.push({ tarjeta: t, dir: "df" });
+  }
+
+  // Mezclar evitando que dos entradas de la misma tarjeta queden consecutivas
+  colaRepaso = mezclarSinConsecutivos(entradas);
   indiceActual = 0;
 
   if (colaRepaso.length === 0) {
@@ -150,13 +205,23 @@ function mostrarTarjetaActual() {
   document.getElementById("progreso-texto").textContent =
     `${indiceActual} de ${total}`;
 
-  const t = colaRepaso[indiceActual];
-  document.getElementById("texto-frente").textContent = t.frente;
-  document.getElementById("texto-dorso").textContent  = t.dorso;
+  const { tarjeta, dir } = colaRepaso[indiceActual];
+  const textoFrente = dir === "fd" ? tarjeta.frente : tarjeta.dorso;
+  const textoDorso  = dir === "fd" ? tarjeta.dorso  : tarjeta.frente;
 
-  // Resetear estado visual
+  document.getElementById("texto-frente").textContent = textoFrente;
+  document.getElementById("texto-dorso").textContent  = textoDorso;
+
+  // Resetear estado visual SIN animación de volteo
+  // (se desactiva la transición momentáneamente para evitar el giro involuntario)
   volteada = false;
-  document.getElementById("tarjeta").classList.remove("volteada");
+  const tarjetaEl = document.getElementById("tarjeta");
+  tarjetaEl.style.transition = "none";
+  tarjetaEl.classList.remove("volteada");
+  // Forzar reflow para que el cambio se aplique antes de reactivar la transición
+  tarjetaEl.offsetHeight; // eslint-disable-line no-unused-expressions
+  tarjetaEl.style.transition = "";
+
   document.getElementById("btns-calificacion").style.display = "none";
   document.getElementById("btn-voltear").style.display = "inline-block";
 }
@@ -174,9 +239,12 @@ function voltearTarjeta() {
 }
 
 async function calificar(calidad) {
-  const t = colaRepaso[indiceActual];
-  const datos = calcularRepaso(t, calidad);
-  await actualizarTarjeta(t.id, datos);
+  const { tarjeta, dir } = colaRepaso[indiceActual];
+  const estadoActual = estadoDir(tarjeta, dir);
+  const nuevoEstado  = calcularRepaso(estadoActual, calidad);
+
+  // Guardar en Firestore solo el subobjeto de la dirección correspondiente
+  await actualizarTarjeta(tarjeta.id, { [dir]: nuevoEstado });
 
   indiceActual++;
 
