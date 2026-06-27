@@ -1,22 +1,12 @@
-// =============================================
-//  MEMORRO — app.js
-//  Firebase + algoritmo SM-2 simplificado
-// =============================================
+// ═══════════════════════════════════════════════════════════════════════════
+//  FIREBASE CONFIG
+//  Sustituye estos valores por los de tu proyecto en Firebase Console.
+// ═══════════════════════════════════════════════════════════════════════════
+import { initializeApp }              from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getFirestore, collection, getDocs,
+         addDoc, updateDoc, deleteDoc,
+         doc, serverTimestamp }       from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import {
-  getFirestore,
-  collection,
-  addDoc,
-  getDocs,
-  doc,
-  updateDoc,
-  deleteDoc,
-  query,
-  orderBy
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-
-// --- CONFIGURACIÓN FIREBASE ---
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
   authDomain: "memorro-b4939.firebaseapp.com",
@@ -26,620 +16,460 @@ const firebaseConfig = {
   appId: "1:787070583852:web:3c0d4e1347b4786ddc7d89"
 };
 
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp);
-const COL = "tarjetas";
-
-// =============================================
-//  ALGORITMO SM-2 SIMPLIFICADO
-//  calidad: 1=Mal, 2=Regular, 3=Bien, 4=Perfecto
-// =============================================
-// Calcula el nuevo estado SM-2 a partir de un subobjeto de estado {intervalo, repeticiones, facilidad, ...}
-function calcularRepaso(estado, calidad) {
-  let { intervalo = 1, repeticiones = 0, facilidad = 2.5 } = estado;
-
-  if (calidad < 2) {
-    // Mal: reiniciar
-    repeticiones = 0;
-    intervalo = 1;
-  } else {
-    if (repeticiones === 0) intervalo = 1;
-    else if (repeticiones === 1) intervalo = 3;
-    else intervalo = Math.round(intervalo * facilidad);
-
-    repeticiones += 1;
-    facilidad = Math.max(1.3, facilidad + (0.1 - (4 - calidad) * (0.08 + (4 - calidad) * 0.02)));
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: Card
+//  Modelo de datos de una tarjeta. No tiene lógica de UI.
+// ═══════════════════════════════════════════════════════════════════════════
+class Card {
+  /**
+   * @param {string} id       – ID del documento en Firestore (vacío si es nueva)
+   * @param {string} front    – Texto del frente
+   * @param {string} back     – Texto del dorso
+   * @param {Date|null} createdAt
+   */
+  constructor(id, front, back, createdAt = null) {
+    this.id        = id;
+    this.front     = front.trim();
+    this.back      = back.trim();
+    this.createdAt = createdAt ?? new Date();
   }
 
-  const ahora = Date.now();
-  const proxima = ahora + intervalo * 24 * 60 * 60 * 1000;
-
-  return { intervalo, repeticiones, facilidad, ultimoRepaso: ahora, proximoRepaso: proxima };
-}
-
-// Devuelve el subobjeto SM-2 de una tarjeta para la dirección dada,
-// con compatibilidad hacia atrás para tarjetas antiguas (sin fd/df).
-function estadoDir(tarjeta, dir) {
-  if (tarjeta[dir]) return tarjeta[dir];
-  // Tarjeta antigua: usar los campos raíz como estado inicial de fd
-  if (dir === "fd") {
+  /** Datos planos para guardar en Firestore (sin el id) */
+  toFirestore() {
     return {
-      intervalo:     tarjeta.intervalo     ?? 1,
-      repeticiones:  tarjeta.repeticiones  ?? 0,
-      facilidad:     tarjeta.facilidad     ?? 2.5,
-      ultimoRepaso:  tarjeta.ultimoRepaso  ?? null,
-      proximoRepaso: tarjeta.proximoRepaso ?? null,
+      front:     this.front,
+      back:      this.back,
+      createdAt: serverTimestamp(),
     };
   }
-  // df de tarjeta antigua: empieza desde cero
-  return { intervalo: 1, repeticiones: 0, facilidad: 2.5, ultimoRepaso: null, proximoRepaso: null };
-}
 
-function esDirDebida(tarjeta, dir) {
-  const e = estadoDir(tarjeta, dir);
-  if (!e.proximoRepaso) return true;
-  return Date.now() >= e.proximoRepaso;
-}
-
-function nivelTexto(tarjeta) {
-  // Muestra el nivel basado en fd con compatibilidad hacia atrás
-  const r = (tarjeta.fd?.repeticiones ?? tarjeta.repeticiones) || 0;
-  if (r === 0) return "Nueva";
-  if (r === 1) return "Aprendiendo";
-  if (r < 4)  return "Progresando";
-  return "Dominada";
-}
-
-// =============================================
-//  ESTADO DE LA APP
-// =============================================
-let todasTarjetas = [];   // todas las tarjetas de Firestore
-let colaRepaso    = [];   // tarjetas debidas hoy
-let indiceActual  = 0;
-let volteada      = false;
-let editandoId    = null; // null = creando nueva
-let borrandoId    = null;
-
-// =============================================
-//  FIRESTORE: CRUD
-// =============================================
-async function cargarTarjetas() {
-  const q = query(collection(db, COL), orderBy("creadaEn", "asc"));
-  const snap = await getDocs(q);
-  todasTarjetas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-}
-
-async function guardarTarjeta(frente, dorso) {
-  const estadoInicial = { intervalo: 1, repeticiones: 0, facilidad: 2.5, ultimoRepaso: null, proximoRepaso: null };
-  const nueva = {
-    frente, dorso,
-    fd: { ...estadoInicial },  // estado SM-2 dirección frente→dorso
-    df: { ...estadoInicial },  // estado SM-2 dirección dorso→frente
-    creadaEn: Date.now()
-  };
-  const ref = await addDoc(collection(db, COL), nueva);
-  todasTarjetas.push({ id: ref.id, ...nueva });
-}
-
-async function actualizarTarjeta(id, datos) {
-  await updateDoc(doc(db, COL, id), datos);
-  const i = todasTarjetas.findIndex(t => t.id === id);
-  if (i !== -1) todasTarjetas[i] = { ...todasTarjetas[i], ...datos };
-}
-
-async function eliminarTarjeta(id) {
-  await deleteDoc(doc(db, COL, id));
-  todasTarjetas = todasTarjetas.filter(t => t.id !== id);
-}
-
-// =============================================
-//  NAVEGACIÓN ENTRE VISTAS
-// =============================================
-function mostrarVista(nombre) {
-  document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-  document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
-
-  document.getElementById(`view-${nombre}`).classList.add("active");
-  document.querySelector(`.nav-btn[data-view="${nombre}"]`)?.classList.add("active");
-
-  if (nombre === "repasar")  iniciarRepaso();
-  if (nombre === "tarjetas") renderLista();
-  if (nombre === "nueva")    abrirFormulario();
-}
-
-// =============================================
-//  VISTA: REPASAR
-// =============================================
-// Mezcla un array de entradas {tarjeta, dir} evitando que dos entradas
-// de la misma tarjeta aparezcan seguidas.
-function mezclarSinConsecutivos(arr) {
-  // Fisher-Yates shuffle
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
+  /** Construye un Card desde un DocumentSnapshot de Firestore */
+  static fromFirestore(snapshot) {
+    const d = snapshot.data();
+    return new Card(
+      snapshot.id,
+      d.front  ?? "",
+      d.back   ?? "",
+      d.createdAt?.toDate() ?? null,
+    );
   }
-  // Reordenar para evitar consecutivos con mismo id
-  for (let i = 1; i < a.length; i++) {
-    if (a[i].tarjeta.id === a[i - 1].tarjeta.id) {
-      // Buscar el siguiente elemento con id distinto para intercambiar
-      for (let j = i + 1; j < a.length; j++) {
-        if (a[j].tarjeta.id !== a[i - 1].tarjeta.id) {
-          [a[i], a[j]] = [a[j], a[i]];
-          break;
-        }
+
+  /** Devuelve true si el texto de filtro aparece en frente o dorso */
+  matches(filter) {
+    const q = filter.toLowerCase();
+    return this.front.toLowerCase().includes(q)
+        || this.back.toLowerCase().includes(q);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: CardRepository
+//  Toda la interacción con Firestore pasa por aquí.
+// ═══════════════════════════════════════════════════════════════════════════
+class CardRepository {
+  /**
+   * @param {import("firebase/firestore").Firestore} db
+   * @param {string} collectionName
+   */
+  constructor(db, collectionName = "cards") {
+    this._db  = db;
+    this._col = collection(db, collectionName);
+  }
+
+  /** Carga todas las tarjetas de Firestore → Array<Card> */
+  async fetchAll() {
+    const snap = await getDocs(this._col);
+    return snap.docs.map(Card.fromFirestore);
+  }
+
+  /** Guarda una nueva tarjeta. Devuelve la Card con el id asignado. */
+  async add(card) {
+    const ref = await addDoc(this._col, card.toFirestore());
+    card.id = ref.id;
+    return card;
+  }
+
+  /** Actualiza frente y dorso de una tarjeta existente. */
+  async update(card) {
+    const ref = doc(this._db, this._col.path, card.id);
+    await updateDoc(ref, { front: card.front, back: card.back });
+  }
+
+  /** Elimina una tarjeta por su id. */
+  async remove(cardId) {
+    const ref = doc(this._db, this._col.path, cardId);
+    await deleteDoc(ref);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: ReviewSession
+//  Controla el flujo de repaso: elegir tarjeta, registrar resultado.
+// ═══════════════════════════════════════════════════════════════════════════
+class ReviewSession {
+  /** @param {Card[]} cards */
+  constructor(cards) {
+    this._cards   = [...cards];
+    this._current = null;
+  }
+
+  get hasCards() { return this._cards.length > 0; }
+
+  /** Elige una tarjeta al azar y la devuelve */
+  pickRandom() {
+    if (!this.hasCards) return null;
+    const idx      = Math.floor(Math.random() * this._cards.length);
+    this._current  = this._cards[idx];
+    return this._current;
+  }
+
+  /**
+   * Registra la valoración del usuario sobre la tarjeta actual.
+   * Por ahora solo devuelve el objeto; aquí se podrá añadir lógica de SM-2 etc.
+   * @param {"perfect"|"good"|"ok"|"bad"} rating
+   */
+  recordRating(rating) {
+    return { card: this._current, rating };
+  }
+
+  /** Permite actualizar el pool de tarjetas sin crear una sesión nueva */
+  updateCards(cards) {
+    this._cards = [...cards];
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: App
+//  Controlador principal: coordina vistas, repositorio y sesión.
+// ═══════════════════════════════════════════════════════════════════════════
+class App {
+  constructor(repository) {
+    this._repo    = repository;
+    this._cards   = [];          // caché local
+    this._session = new ReviewSession([]);
+    this._editingCard = null;    // tarjeta abierta en el modal
+    this._filterDebounceTimer = null;
+
+    this._bindDOM();
+    this._bindEvents();
+  }
+
+  // ─── Cachés de elementos DOM ──────────────────────────────────────────
+  _bindDOM() {
+    // Views
+    this.$views = {
+      review : document.getElementById("view-review"),
+      edit   : document.getElementById("view-edit"),
+      add    : document.getElementById("view-add"),
+    };
+
+    // Review
+    this.$reviewCount    = document.getElementById("review-count");
+    this.$cardScene      = document.getElementById("card-scene");
+    this.$cardFlipper    = document.getElementById("card-flipper");
+    this.$cardFrontText  = document.getElementById("card-front-text");
+    this.$cardBackText   = document.getElementById("card-back-text");
+    this.$flipPrompt     = document.getElementById("flip-prompt");
+    this.$btnFlip        = document.getElementById("btn-flip");
+    this.$ratingArea     = document.getElementById("rating-area");
+    this.$reviewEmpty    = document.getElementById("review-empty");
+
+    // Edit
+    this.$editCount      = document.getElementById("edit-count");
+    this.$searchInput    = document.getElementById("search-input");
+    this.$cardList       = document.getElementById("card-list");
+    this.$editEmpty      = document.getElementById("edit-empty");
+
+    // Add
+    this.$addFront       = document.getElementById("add-front");
+    this.$addBack        = document.getElementById("add-back");
+    this.$addDouble      = document.getElementById("add-double");
+    this.$btnAddSave     = document.getElementById("btn-add-save");
+    this.$addFeedback    = document.getElementById("add-feedback");
+
+    // Modal
+    this.$modalOverlay   = document.getElementById("modal-overlay");
+    this.$editFront      = document.getElementById("edit-front");
+    this.$editBack       = document.getElementById("edit-back");
+    this.$btnModalClose  = document.getElementById("btn-modal-close");
+    this.$btnModalSave   = document.getElementById("btn-modal-save");
+    this.$btnModalDelete = document.getElementById("btn-modal-delete");
+    this.$editFeedback   = document.getElementById("edit-feedback");
+
+    // Nav
+    this.$navBtns = document.querySelectorAll(".nav-btn");
+  }
+
+  // ─── Event listeners ──────────────────────────────────────────────────
+  _bindEvents() {
+    // Navegación
+    this.$navBtns.forEach(btn => {
+      btn.addEventListener("click", () => this._navigateTo(btn.dataset.view));
+    });
+
+    // Review: voltear
+    this.$btnFlip.addEventListener("click", () => this._flipCard());
+
+    // Review: valorar
+    document.querySelectorAll(".btn-rating").forEach(btn => {
+      btn.addEventListener("click", () => this._rateCard(btn.dataset.rating));
+    });
+
+    // Edit: filtro con debounce
+    this.$searchInput.addEventListener("input", () => {
+      clearTimeout(this._filterDebounceTimer);
+      this._filterDebounceTimer = setTimeout(() => this._renderCardList(), 800);
+    });
+
+    // Add: guardar
+    this.$btnAddSave.addEventListener("click", () => this._addCard());
+
+    // Modal: cerrar
+    this.$btnModalClose.addEventListener("click", () => this._closeModal());
+    this.$modalOverlay.addEventListener("click", (e) => {
+      if (e.target === this.$modalOverlay) this._closeModal();
+    });
+
+    // Modal: guardar y eliminar
+    this.$btnModalSave.addEventListener("click",   () => this._saveEdit());
+    this.$btnModalDelete.addEventListener("click", () => this._deleteCard());
+  }
+
+  // ─── Inicialización ───────────────────────────────────────────────────
+  async init() {
+    try {
+      this._cards = await this._repo.fetchAll();
+      this._session.updateCards(this._cards);
+      this._updateBadges();
+      this._renderReview();
+    } catch (err) {
+      console.error("Error cargando tarjetas:", err);
+    }
+  }
+
+  // ─── Navegación ───────────────────────────────────────────────────────
+  _navigateTo(viewName) {
+    // Actualizar nav buttons
+    this.$navBtns.forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.view === viewName);
+    });
+
+    // Mostrar/ocultar vistas
+    Object.entries(this.$views).forEach(([name, el]) => {
+      el.classList.toggle("hidden", name !== viewName);
+    });
+
+    // Al abrir "edit" renderizamos la lista
+    if (viewName === "edit") {
+      this.$searchInput.value = "";
+      this._renderCardList();
+    }
+
+    // Al abrir "review" preparamos la siguiente tarjeta
+    if (viewName === "review") {
+      this._renderReview();
+    }
+  }
+
+  // ─── Badges de contador ───────────────────────────────────────────────
+  _updateBadges() {
+    const n = this._cards.length;
+    const label = n === 1 ? "1 tarjeta" : `${n} tarjetas`;
+    this.$reviewCount.textContent = label;
+    this.$editCount.textContent   = label;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  VIEW: REVIEW
+  // ═══════════════════════════════════════════════════════════════════════
+  _renderReview() {
+    // Resetear estado visual
+    this.$cardFlipper.classList.remove("flipped");
+    this.$ratingArea.classList.add("hidden");
+
+    if (!this._session.hasCards) {
+      this.$cardScene.classList.add("hidden");
+      this.$flipPrompt.classList.add("hidden");
+      this.$reviewEmpty.classList.remove("hidden");
+      return;
+    }
+
+    this.$reviewEmpty.classList.add("hidden");
+
+    const card = this._session.pickRandom();
+    this.$cardFrontText.textContent = card.front;
+    this.$cardBackText.textContent  = card.back;
+
+    this.$cardScene.classList.remove("hidden");
+    this.$flipPrompt.classList.remove("hidden");
+  }
+
+  _flipCard() {
+    this.$cardFlipper.classList.add("flipped");
+    this.$flipPrompt.classList.add("hidden");
+    // Mostrar valoración tras la animación
+    setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
+  }
+
+  _rateCard(rating) {
+    this._session.recordRating(rating);
+    // Pequeña pausa visual antes de la siguiente tarjeta
+    this.$ratingArea.classList.add("hidden");
+    this.$cardScene.classList.add("hidden");
+    setTimeout(() => this._renderReview(), 150);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  VIEW: EDIT
+  // ═══════════════════════════════════════════════════════════════════════
+  _renderCardList() {
+    const filter  = this.$searchInput.value.trim();
+    const visible = filter
+      ? this._cards.filter(c => c.matches(filter))
+      : this._cards;
+
+    this.$cardList.innerHTML = "";
+
+    if (visible.length === 0) {
+      this.$editEmpty.classList.remove("hidden");
+      return;
+    }
+
+    this.$editEmpty.classList.add("hidden");
+
+    visible.forEach(card => {
+      const item = document.createElement("div");
+      item.className = "card-list-item";
+      item.innerHTML = `
+        <div class="card-list-front">${this._esc(card.front)}</div>
+        <div class="card-list-back">${this._esc(card.back)}</div>
+      `;
+      item.addEventListener("click", () => this._openModal(card));
+      this.$cardList.appendChild(item);
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  MODAL: Edit / Delete
+  // ═══════════════════════════════════════════════════════════════════════
+  _openModal(card) {
+    this._editingCard         = card;
+    this.$editFront.value     = card.front;
+    this.$editBack.value      = card.back;
+    this.$editFeedback.classList.add("hidden");
+    this.$modalOverlay.classList.remove("hidden");
+  }
+
+  _closeModal() {
+    this.$modalOverlay.classList.add("hidden");
+    this._editingCard = null;
+  }
+
+  async _saveEdit() {
+    const front = this.$editFront.value.trim();
+    const back  = this.$editBack.value.trim();
+
+    if (!front || !back) {
+      this._showFeedback(this.$editFeedback, "Frente y dorso son obligatorios.", "error");
+      return;
+    }
+
+    this._editingCard.front = front;
+    this._editingCard.back  = back;
+
+    try {
+      await this._repo.update(this._editingCard);
+      this._session.updateCards(this._cards);
+      this._updateBadges();
+      this._closeModal();
+      this._renderCardList();
+    } catch (err) {
+      this._showFeedback(this.$editFeedback, "Error al guardar. Inténtalo de nuevo.", "error");
+      console.error(err);
+    }
+  }
+
+  async _deleteCard() {
+    if (!confirm(`¿Eliminar la tarjeta "${this._editingCard.front}"?`)) return;
+
+    try {
+      await this._repo.remove(this._editingCard.id);
+      this._cards = this._cards.filter(c => c.id !== this._editingCard.id);
+      this._session.updateCards(this._cards);
+      this._updateBadges();
+      this._closeModal();
+      this._renderCardList();
+    } catch (err) {
+      this._showFeedback(this.$editFeedback, "Error al eliminar.", "error");
+      console.error(err);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  VIEW: ADD
+  // ═══════════════════════════════════════════════════════════════════════
+  async _addCard() {
+    const front  = this.$addFront.value.trim();
+    const back   = this.$addBack.value.trim();
+    const double = this.$addDouble.checked;
+
+    if (!front || !back) {
+      this._showFeedback(this.$addFeedback, "Frente y dorso son obligatorios.", "error");
+      return;
+    }
+
+    try {
+      const cards = [new Card("", front, back)];
+      if (double) cards.push(new Card("", back, front));
+
+      for (const card of cards) {
+        await this._repo.add(card);
+        this._cards.push(card);
       }
-    }
-  }
-  return a;
-}
 
-function iniciarRepaso() {
-  // Construir cola bidireccional: una entrada por cada dirección debida
-  // Formato de cada entrada: { tarjeta, dir }  donde dir = "fd" | "df"
-  const entradas = [];
-  for (const t of todasTarjetas) {
-    if (esDirDebida(t, "fd")) entradas.push({ tarjeta: t, dir: "fd" });
-    if (esDirDebida(t, "df")) entradas.push({ tarjeta: t, dir: "df" });
-  }
+      this._session.updateCards(this._cards);
+      this._updateBadges();
 
-  // Mezclar evitando que dos entradas de la misma tarjeta queden consecutivas
-  colaRepaso = mezclarSinConsecutivos(entradas);
-  indiceActual = 0;
+      // Limpiar formulario
+      this.$addFront.value = "";
+      this.$addBack.value  = "";
+      this.$addDouble.checked = true;
 
-  if (colaRepaso.length === 0) {
-    document.getElementById("repaso-vacio").style.display = "block";
-    document.getElementById("repaso-activo").style.display = "none";
-  } else {
-    document.getElementById("repaso-vacio").style.display = "none";
-    document.getElementById("repaso-activo").style.display = "block";
-    mostrarTarjetaActual();
-  }
-}
+      const msg = double
+        ? "✓ Dos tarjetas añadidas (frente→dorso y dorso→frente)."
+        : "✓ Tarjeta añadida.";
+      this._showFeedback(this.$addFeedback, msg, "success");
 
-function mostrarTarjetaActual() {
-  const total = colaRepaso.length;
-  const pct   = Math.round((indiceActual / total) * 100);
-
-  document.getElementById("progreso-barra").style.width = pct + "%";
-  document.getElementById("progreso-texto").textContent =
-    `${indiceActual} de ${total}`;
-
-  const { tarjeta, dir } = colaRepaso[indiceActual];
-  const textoFrente = dir === "fd" ? tarjeta.frente : tarjeta.dorso;
-  const textoDorso  = dir === "fd" ? tarjeta.dorso  : tarjeta.frente;
-
-  document.getElementById("texto-frente").textContent = textoFrente;
-  document.getElementById("texto-dorso").textContent  = textoDorso;
-
-  // Resetear estado visual SIN animación de volteo
-  // (se desactiva la transición momentáneamente para evitar el giro involuntario)
-  volteada = false;
-  const tarjetaEl = document.getElementById("tarjeta");
-  tarjetaEl.style.transition = "none";
-  tarjetaEl.classList.remove("volteada");
-  // Forzar reflow para que el cambio se aplique antes de reactivar la transición
-  tarjetaEl.offsetHeight; // eslint-disable-line no-unused-expressions
-  tarjetaEl.style.transition = "";
-
-  document.getElementById("btns-calificacion").style.display = "none";
-  document.getElementById("btn-voltear").style.display = "inline-block";
-}
-
-function voltearTarjeta() {
-  volteada = !volteada;
-  document.getElementById("tarjeta").classList.toggle("volteada", volteada);
-  if (volteada) {
-    document.getElementById("btn-voltear").style.display = "none";
-    document.getElementById("btns-calificacion").style.display = "flex";
-  } else {
-    document.getElementById("btn-voltear").style.display = "inline-block";
-    document.getElementById("btns-calificacion").style.display = "none";
-  }
-}
-
-async function calificar(calidad) {
-  const { tarjeta, dir } = colaRepaso[indiceActual];
-  const estadoActual = estadoDir(tarjeta, dir);
-  const nuevoEstado  = calcularRepaso(estadoActual, calidad);
-
-  // Guardar en Firestore solo el subobjeto de la dirección correspondiente
-  await actualizarTarjeta(tarjeta.id, { [dir]: nuevoEstado });
-
-  indiceActual++;
-
-  const escena = document.getElementById("tarjeta-escena");
-
-  if (indiceActual >= colaRepaso.length) {
-    // Fade out y luego mostrar fin de sesión
-    escena.classList.add("fadout");
-    setTimeout(() => {
-      document.getElementById("progreso-barra").style.width = "100%";
-      document.getElementById("progreso-texto").textContent = "¡Sesión completada!";
-      escena.style.display = "none";
-      document.getElementById("acciones-repaso").style.display = "none";
-      const wrap = document.getElementById("repaso-activo");
-      const msg  = document.createElement("p");
-      msg.className = "vacio-titulo";
-      msg.style.marginTop = "2rem";
-      msg.textContent = "¡Has repasado todas las tarjetas de hoy!";
-      wrap.appendChild(msg);
-    }, 200);
-  } else {
-    // Fade out → actualizar contenido → fade in
-    escena.classList.add("fadout");
-    setTimeout(() => {
-      mostrarTarjetaActual();          // actualiza textos con la tarjeta ya en posición frente
-      escena.classList.remove("fadout");
-    }, 200);
-  }
-}
-
-// =============================================
-//  VISTA: LISTA
-// =============================================
-function renderLista(filtro = "") {
-  const lista = document.getElementById("lista-tarjetas");
-  const vacia = document.getElementById("lista-vacia");
-  lista.innerHTML = "";
-
-  const filtradas = filtro
-    ? todasTarjetas.filter(t =>
-        t.frente.toLowerCase().includes(filtro) ||
-        t.dorso.toLowerCase().includes(filtro))
-    : todasTarjetas;
-
-  if (filtradas.length === 0) {
-    vacia.style.display = "block";
-    return;
-  }
-  vacia.style.display = "none";
-
-  filtradas.forEach(t => {
-    const item = document.createElement("div");
-    item.className = "item-tarjeta";
-    item.innerHTML = `
-      <div class="item-textos">
-        <div class="item-frente">${escHtml(t.frente)}</div>
-        <div class="item-dorso">${escHtml(t.dorso)}</div>
-      </div>
-      <span class="item-nivel">${nivelTexto(t)}</span>
-      <div class="item-acciones">
-        <button class="btn-icono editar" data-id="${t.id}">Editar</button>
-        <button class="btn-icono eliminar" data-id="${t.id}">Borrar</button>
-      </div>
-    `;
-    lista.appendChild(item);
-  });
-
-  lista.querySelectorAll(".btn-icono.editar").forEach(btn =>
-    btn.addEventListener("click", () => abrirEdicion(btn.dataset.id)));
-  lista.querySelectorAll(".btn-icono.eliminar").forEach(btn =>
-    btn.addEventListener("click", () => abrirModal(btn.dataset.id)));
-}
-
-function escHtml(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-}
-
-// =============================================
-//  VISTA: FORMULARIO
-// =============================================
-function abrirFormulario(id = null) {
-  editandoId = id;
-  document.getElementById("form-titulo").textContent =
-    id ? "Editar tarjeta" : "Nueva tarjeta";
-  document.getElementById("form-error").textContent = "";
-
-  if (id) {
-    const t = todasTarjetas.find(t => t.id === id);
-    document.getElementById("input-frente").value = t?.frente || "";
-    document.getElementById("input-dorso").value  = t?.dorso  || "";
-  } else {
-    document.getElementById("input-frente").value = "";
-    document.getElementById("input-dorso").value  = "";
-  }
-}
-
-function abrirEdicion(id) {
-  mostrarVista("nueva");
-  abrirFormulario(id);
-}
-
-async function onGuardar() {
-  const frente = document.getElementById("input-frente").value.trim();
-  const dorso  = document.getElementById("input-dorso").value.trim();
-  const err    = document.getElementById("form-error");
-
-  if (!frente || !dorso) {
-    err.textContent = "Rellena los dos campos antes de guardar.";
-    return;
-  }
-  err.textContent = "";
-
-  try {
-    if (editandoId) {
-      await actualizarTarjeta(editandoId, { frente, dorso });
-    } else {
-      await guardarTarjeta(frente, dorso);
-    }
-    mostrarVista("tarjetas");
-  } catch (e) {
-    err.textContent = "Error al guardar. Comprueba tu conexión.";
-    console.error(e);
-  }
-}
-
-// =============================================
-//  MODAL BORRADO
-// =============================================
-function abrirModal(id) {
-  borrandoId = id;
-  document.getElementById("modal-overlay").style.display = "flex";
-}
-function cerrarModal() {
-  borrandoId = null;
-  document.getElementById("modal-overlay").style.display = "none";
-}
-async function confirmarBorrado() {
-  if (!borrandoId) return;
-  try {
-    await eliminarTarjeta(borrandoId);
-    cerrarModal();
-    renderLista(document.getElementById("buscador").value.toLowerCase());
-  } catch(e) {
-    console.error(e);
-    cerrarModal();
-  }
-}
-
-// =============================================
-//  IMPORTACIÓN CSV
-//  Formato esperado: dos columnas (frente,dorso)
-//  con o sin cabecera, delimitador , o ;
-// =============================================
-
-// Normaliza un texto para comparación: minúsculas, sin acentos, sin espacios extra
-function normalizar(s) {
-  return s.trim().toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ");
-}
-
-// Distancia de Levenshtein (para fuzzy matching)
-function levenshtein(a, b) {
-  const m = a.length, n = b.length;
-  const dp = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = a[i-1] === b[j-1]
-        ? dp[i-1][j-1]
-        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
-  return dp[m][n];
-}
-
-function similitud(a, b) {
-  const na = normalizar(a), nb = normalizar(b);
-  if (na === nb) return 1;
-  const maxLen = Math.max(na.length, nb.length);
-  if (maxLen === 0) return 1;
-  return 1 - levenshtein(na, nb) / maxLen;
-}
-
-// Parsea CSV simple (coma o punto y coma, respeta comillas dobles)
-function parsearCSV(texto) {
-  const sep = texto.includes(";") && !texto.includes(",") ? ";" : ",";
-  const lineas = texto.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-  const filas = [];
-  for (const linea of lineas) {
-    if (!linea.trim()) continue;
-    // Split respetando comillas dobles
-    const cols = [];
-    let cur = "", dentro = false;
-    for (let i = 0; i < linea.length; i++) {
-      const c = linea[i];
-      if (c === '"') { dentro = !dentro; continue; }
-      if (c === sep && !dentro) { cols.push(cur.trim()); cur = ""; continue; }
-      cur += c;
-    }
-    cols.push(cur.trim());
-    if (cols.length >= 2) filas.push(cols);
-  }
-  return filas;
-}
-
-// Estado temporal de importación
-let pendientesImportar = []; // tarjetas limpias a insertar
-let duplicadosFuzzy    = []; // { nueva, existente, sim }
-
-function onArchivoCSV(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  e.target.value = ""; // reset para permitir reimportar el mismo fichero
-
-  const reader = new FileReader();
-  reader.onload = ev => procesarCSV(ev.target.result);
-  reader.readAsText(file, "UTF-8");
-}
-
-function procesarCSV(texto) {
-  // Quitar BOM si existe
-  const contenido = texto.replace(/^\uFEFF/, "");
-  const filas = parsearCSV(contenido);
-
-  if (filas.length === 0) {
-    mostrarResultadoImport("El fichero está vacío o no tiene el formato correcto.", true);
-    return;
-  }
-
-  // Detectar si la primera fila es cabecera (ninguna celda coincide con tarjetas existentes
-  // y parece texto genérico: "frente","alemán","front","palabra", etc.)
-  const palabrasCabecera = ["frente","dorso","front","back","alemán","español",
-                            "german","spanish","palabra","traduccion","traducción","question","answer"];
-  let inicio = 0;
-  const primeraFila0 = normalizar(filas[0][0]);
-  if (palabrasCabecera.some(p => primeraFila0.includes(p))) inicio = 1;
-
-  const nuevas = filas.slice(inicio).map(f => ({
-    frente: f[0].trim(),
-    dorso:  f[1].trim()
-  })).filter(t => t.frente && t.dorso);
-
-  if (nuevas.length === 0) {
-    mostrarResultadoImport("No se encontraron entradas válidas.", true);
-    return;
-  }
-
-  // --- DEDUPLICACIÓN ---
-  const exactas   = new Set(todasTarjetas.map(t => normalizar(t.frente)));
-  pendientesImportar = [];
-  duplicadosFuzzy    = [];
-
-  for (const nueva of nuevas) {
-    const normNueva = normalizar(nueva.frente);
-
-    // 1. Duplicado exacto → descartar silenciosamente
-    if (exactas.has(normNueva)) continue;
-
-    // 2. Fuzzy: buscar la tarjeta existente más parecida
-    let maxSim = 0, masParecida = null;
-    for (const existente of todasTarjetas) {
-      const s = similitud(nueva.frente, existente.frente);
-      if (s > maxSim) { maxSim = s; masParecida = existente; }
-    }
-
-    if (maxSim >= 0.85 && masParecida) {
-      duplicadosFuzzy.push({ nueva, existente: masParecida, sim: maxSim });
-    } else {
-      pendientesImportar.push(nueva);
+    } catch (err) {
+      this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
+      console.error(err);
     }
   }
 
-  if (duplicadosFuzzy.length > 0) {
-    // Mostrar modal de revisión
-    mostrarModalDuplicados();
-  } else {
-    ejecutarImportacion();
+  // ─── Helpers ──────────────────────────────────────────────────────────
+  _showFeedback(el, msg, type) {
+    el.textContent = msg;
+    el.className   = `form-feedback ${type}`;
+    el.classList.remove("hidden");
+    setTimeout(() => el.classList.add("hidden"), 4000);
+  }
+
+  /** Escapa HTML para evitar XSS al insertar texto de tarjetas en el DOM */
+  _esc(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 }
 
-function mostrarModalDuplicados() {
-  const lista = document.getElementById("dup-lista");
-  lista.innerHTML = "";
-  for (const { nueva, existente } of duplicadosFuzzy) {
-    const item = document.createElement("div");
-    item.className = "dup-item";
-    item.innerHTML = `
-      <strong>${escHtml(nueva.frente)}</strong> → ${escHtml(nueva.dorso)}<br>
-      <span>Similar a: <em>${escHtml(existente.frente)}</em> → ${escHtml(existente.dorso)}</span>
-    `;
-    lista.appendChild(item);
-  }
-  document.getElementById("modal-duplicados").style.display = "flex";
-}
+// ═══════════════════════════════════════════════════════════════════════════
+//  BOOTSTRAP
+// ═══════════════════════════════════════════════════════════════════════════
+const firebaseApp = initializeApp(firebaseConfig);
+const db          = getFirestore(firebaseApp);
+const repository  = new CardRepository(db);
+const app         = new App(repository);
 
-async function ejecutarImportacion(incluirFuzzy = false) {
-  const aCargear = incluirFuzzy
-    ? [...pendientesImportar, ...duplicadosFuzzy.map(d => d.nueva)]
-    : pendientesImportar;
-
-  if (aCargear.length === 0) {
-    mostrarResultadoImport("No hay tarjetas nuevas que importar.");
-    return;
-  }
-
-  try {
-    for (const t of aCargear) {
-      await guardarTarjeta(t.frente, t.dorso);
-    }
-    const omitidas = duplicadosFuzzy.length - (incluirFuzzy ? 0 : duplicadosFuzzy.length);
-    const msg = `✓ ${aCargear.length} tarjeta${aCargear.length !== 1 ? "s" : ""} importada${aCargear.length !== 1 ? "s" : ""}` +
-      (omitidas > 0 ? ` · ${omitidas} omitida${omitidas !== 1 ? "s" : ""} por similitud` : "");
-    mostrarResultadoImport(msg);
-  } catch(e) {
-    mostrarResultadoImport("Error al guardar en la base de datos.", true);
-    console.error(e);
-  }
-}
-
-function mostrarResultadoImport(msg, esError = false) {
-  const el = document.getElementById("import-resultado");
-  el.textContent = msg;
-  el.className = "import-resultado" + (esError ? " error" : "");
-  setTimeout(() => { el.textContent = ""; el.className = "import-resultado"; }, 5000);
-}
-
-// =============================================
-//  EVENTOS
-// =============================================
-function bindEventos() {
-  // Navegación
-  document.querySelectorAll(".nav-btn, [data-view]").forEach(el =>
-    el.addEventListener("click", () => {
-      const v = el.dataset.view;
-      if (v) mostrarVista(v);
-    })
-  );
-
-  // Voltear (botón y clic en tarjeta)
-  document.getElementById("btn-voltear").addEventListener("click", voltearTarjeta);
-  document.getElementById("tarjeta-escena").addEventListener("click", voltearTarjeta);
-
-  // Calificar
-  document.querySelectorAll(".btn-cal").forEach(btn =>
-    btn.addEventListener("click", () => calificar(parseInt(btn.dataset.cal)))
-  );
-
-  // Buscador
-  document.getElementById("buscador").addEventListener("input", e =>
-    renderLista(e.target.value.toLowerCase())
-  );
-
-  // Formulario
-  document.getElementById("btn-guardar").addEventListener("click", onGuardar);
-  document.getElementById("btn-cancelar").addEventListener("click", () =>
-    mostrarVista(editandoId ? "tarjetas" : "repasar")
-  );
-
-  // Modal borrado
-  document.getElementById("modal-cancelar").addEventListener("click", cerrarModal);
-  document.getElementById("modal-confirmar").addEventListener("click", confirmarBorrado);
-  document.getElementById("modal-overlay").addEventListener("click", e => {
-    if (e.target === document.getElementById("modal-overlay")) cerrarModal();
-  });
-
-  // Importación CSV
-  document.getElementById("btn-importar").addEventListener("click", () =>
-    document.getElementById("input-csv").click()
-  );
-  document.getElementById("input-csv").addEventListener("change", onArchivoCSV);
-
-  // Modal duplicados fuzzy
-  document.getElementById("dup-omitir").addEventListener("click", () => {
-    document.getElementById("modal-duplicados").style.display = "none";
-    ejecutarImportacion(false);
-  });
-  document.getElementById("dup-incluir").addEventListener("click", () => {
-    document.getElementById("modal-duplicados").style.display = "none";
-    ejecutarImportacion(true);
-  });
-  document.getElementById("modal-duplicados").addEventListener("click", e => {
-    if (e.target === document.getElementById("modal-duplicados")) {
-      document.getElementById("modal-duplicados").style.display = "none";
-      ejecutarImportacion(false);
-    }
-  });
-}
-
-// =============================================
-//  INICIO
-// =============================================
-async function init() {
-  bindEventos();
-  await cargarTarjetas();
-  mostrarVista("repasar");
-}
-
-init().catch(console.error);
+app.init();

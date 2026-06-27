@@ -3,125 +3,154 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Memorro</title>
+  <title>FlashCards</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,600;1,300&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-  <!-- CABECERA -->
-  <header class="app-header">
-    <span class="logo">Memorro</span>
-    <nav class="header-nav">
-      <button class="nav-btn active" data-view="repasar">Repasar</button>
-      <button class="nav-btn" data-view="tarjetas">Tarjetas</button>
-      <button class="nav-btn" data-view="nueva">+ Nueva</button>
-    </nav>
-  </header>
+  <!-- ═══════════════════════════════════════ VIEWS ═══════════════════════════════════════ -->
 
-  <!-- VISTA: REPASAR -->
-  <main id="view-repasar" class="view active">
-    <div id="repaso-vacio" class="estado-vacio" style="display:none;">
-      <p class="vacio-titulo">Sin tarjetas por repasar</p>
-      <p class="vacio-sub">Crea tu primera tarjeta o vuelve más tarde.</p>
-      <button class="btn-primario" data-view="nueva">Crear tarjeta</button>
-    </div>
+  <!-- VIEW: Review -->
+  <div id="view-review" class="view active">
+    <header class="top-bar">
+      <span class="app-title">FlashCards</span>
+      <span id="review-count" class="badge"></span>
+    </header>
 
-    <div id="repaso-activo">
-      <div class="progreso-barra-wrap">
-        <div class="progreso-barra" id="progreso-barra"></div>
+    <main class="review-area">
+      <!-- Empty state -->
+      <div id="review-empty" class="empty-state hidden">
+        <div class="empty-icon">🃏</div>
+        <p>No hay tarjetas todavía.<br>¡Añade algunas para empezar!</p>
       </div>
-      <p class="progreso-texto" id="progreso-texto"></p>
 
-      <div class="tarjeta-escena" id="tarjeta-escena">
-        <div class="tarjeta" id="tarjeta">
-          <div class="tarjeta-cara tarjeta-frente">
-            <span class="cara-label">Pregunta</span>
-            <p id="texto-frente" class="tarjeta-texto"></p>
+      <!-- Card flip container -->
+      <div id="card-scene" class="card-scene hidden">
+        <div id="card-flipper" class="card-flipper">
+          <div class="card-face card-front">
+            <span class="face-label">FRENTE</span>
+            <p id="card-front-text"></p>
           </div>
-          <div class="tarjeta-cara tarjeta-dorso">
-            <span class="cara-label">Respuesta</span>
-            <p id="texto-dorso" class="tarjeta-texto"></p>
+          <div class="card-face card-back">
+            <span class="face-label">DORSO</span>
+            <p id="card-back-text"></p>
           </div>
         </div>
       </div>
 
-      <div class="acciones-repaso" id="acciones-repaso">
-        <button class="btn-voltear" id="btn-voltear">Voltear</button>
-        <div class="btns-calificacion" id="btns-calificacion" style="display:none;">
-          <button class="btn-cal btn-mal" data-cal="1">Mal</button>
-          <button class="btn-cal btn-regular" data-cal="2">Regular</button>
-          <button class="btn-cal btn-bien" data-cal="3">Bien</button>
-          <button class="btn-cal btn-perfecto" data-cal="4">Perfecto</button>
+      <!-- Prompt to flip -->
+      <div id="flip-prompt" class="flip-prompt hidden">
+        <button id="btn-flip" class="btn-flip">Voltear tarjeta</button>
+      </div>
+
+      <!-- Rating buttons -->
+      <div id="rating-area" class="rating-area hidden">
+        <p class="rating-label">¿Cómo ha ido?</p>
+        <div class="rating-buttons">
+          <button class="btn-rating" data-rating="perfect">😄 Perfecto</button>
+          <button class="btn-rating" data-rating="good">🙂 Bien</button>
+          <button class="btn-rating" data-rating="ok">😐 Regular</button>
+          <button class="btn-rating" data-rating="bad">😕 Mal</button>
         </div>
       </div>
+    </main>
+  </div>
+
+  <!-- VIEW: Edit -->
+  <div id="view-edit" class="view hidden">
+    <header class="top-bar">
+      <span class="app-title">Tarjetas</span>
+      <span id="edit-count" class="badge"></span>
+    </header>
+
+    <div class="search-bar-wrap">
+      <input id="search-input" type="text" class="search-input" placeholder="Filtrar tarjetas…" autocomplete="off" />
     </div>
-  </main>
 
-  <!-- VISTA: LISTA DE TARJETAS -->
-  <main id="view-tarjetas" class="view">
-    <div class="view-header">
-      <h2 class="view-titulo">Mis tarjetas</h2>
-      <input type="text" id="buscador" class="buscador" placeholder="Buscar…" />
+    <div id="card-list" class="card-list">
+      <!-- populated by JS -->
     </div>
-    <div id="lista-tarjetas" class="lista-tarjetas"></div>
-    <div id="lista-vacia" class="estado-vacio" style="display:none;">
-      <p class="vacio-titulo">Aún no hay tarjetas</p>
-      <p class="vacio-sub">Empieza creando tu primera tarjeta.</p>
+
+    <div id="edit-empty" class="empty-state hidden">
+      <div class="empty-icon">🔍</div>
+      <p>Sin resultados para ese filtro.</p>
     </div>
-  </main>
+  </div>
 
-  <!-- VISTA: NUEVA / EDITAR TARJETA -->
-  <main id="view-nueva" class="view">
-    <div class="view-header">
-      <h2 class="view-titulo" id="form-titulo">Nueva tarjeta</h2>
-    </div>
-    <div class="formulario">
-      <label class="campo-label" for="input-frente">Pregunta (frente)</label>
-      <textarea id="input-frente" class="campo-texto" rows="4" placeholder="Escribe la palabra o expresión…"></textarea>
+  <!-- VIEW: Add -->
+  <div id="view-add" class="view hidden">
+    <header class="top-bar">
+      <span class="app-title">Nueva tarjeta</span>
+    </header>
 
-      <label class="campo-label" for="input-dorso">Respuesta (dorso)</label>
-      <textarea id="input-dorso" class="campo-texto" rows="4" placeholder="Escribe la traducción o definición…"></textarea>
+    <form id="add-form" class="card-form" onsubmit="return false;">
+      <label class="form-label" for="add-front">Frente</label>
+      <textarea id="add-front" class="form-textarea" placeholder="Escribe el frente…" rows="4"></textarea>
 
-      <div class="formulario-acciones">
-        <button class="btn-secundario" id="btn-cancelar">Cancelar</button>
-        <button class="btn-primario" id="btn-guardar">Guardar tarjeta</button>
-      </div>
-      <p class="form-error" id="form-error"></p>
+      <label class="form-label" for="add-back">Dorso</label>
+      <textarea id="add-back" class="form-textarea" placeholder="Escribe el dorso…" rows="4"></textarea>
 
-      <div class="import-wrap">
-        <span class="import-label">¿Tienes muchas tarjetas? Importa un CSV:</span>
-        <button class="btn-secundario" id="btn-importar">Importar CSV…</button>
-        <input type="file" id="input-csv" accept=".csv,text/csv" />
-      </div>
-      <p class="import-resultado" id="import-resultado"></p>
-    </div>
-  </main>
+      <label class="toggle-label">
+        <div class="toggle-wrap">
+          <input id="add-double" type="checkbox" checked />
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+        </div>
+        <span>Doble (genera frente→dorso y dorso→frente)</span>
+      </label>
 
-  <!-- MODAL CONFIRMAR BORRADO -->
-  <div class="modal-overlay" id="modal-overlay" style="display:none;">
+      <button id="btn-add-save" class="btn-primary">Añadir tarjeta</button>
+      <p id="add-feedback" class="form-feedback hidden"></p>
+    </form>
+  </div>
+
+  <!-- ══════════════════════════════════ MODAL: Edit Card ══════════════════════════════════ -->
+  <div id="modal-overlay" class="modal-overlay hidden">
     <div class="modal">
-      <p class="modal-texto">¿Eliminar esta tarjeta?</p>
-      <div class="modal-acciones">
-        <button class="btn-secundario" id="modal-cancelar">Cancelar</button>
-        <button class="btn-peligro" id="modal-confirmar">Eliminar</button>
+      <div class="modal-header">
+        <span class="modal-title">Editar tarjeta</span>
+        <button id="btn-modal-close" class="btn-icon">✕</button>
       </div>
+
+      <label class="form-label" for="edit-front">Frente</label>
+      <textarea id="edit-front" class="form-textarea" rows="4"></textarea>
+
+      <label class="form-label" for="edit-back">Dorso</label>
+      <textarea id="edit-back" class="form-textarea" rows="4"></textarea>
+
+      <div class="modal-actions">
+        <button id="btn-modal-delete" class="btn-danger">Eliminar</button>
+        <button id="btn-modal-save" class="btn-primary">Guardar</button>
+      </div>
+      <p id="edit-feedback" class="form-feedback hidden"></p>
     </div>
   </div>
 
-  <!-- MODAL DUPLICADOS FUZZY -->
-  <div class="modal-overlay" id="modal-duplicados" style="display:none;">
-    <div class="modal modal-lg">
-      <p class="modal-texto">Posibles duplicados detectados</p>
-      <p class="dup-aviso">Estas entradas son muy similares a tarjetas que ya tienes. ¿Qué quieres hacer con ellas?</p>
-      <div class="dup-lista" id="dup-lista"></div>
-      <div class="modal-acciones">
-        <button class="btn-secundario" id="dup-omitir">Omitirlas</button>
-        <button class="btn-primario"   id="dup-incluir">Incluirlas igual</button>
-      </div>
-    </div>
-  </div>
+  <!-- ═══════════════════════════════════ BOTTOM NAV ═══════════════════════════════════════ -->
+  <nav class="bottom-nav">
+    <button class="nav-btn active" data-view="review">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+      </svg>
+      <span>Repasar</span>
+    </button>
+    <button class="nav-btn" data-view="edit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      </svg>
+      <span>Editar</span>
+    </button>
+    <button class="nav-btn" data-view="add">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+      </svg>
+      <span>Añadir</span>
+    </button>
+  </nav>
 
   <!-- Firebase SDK -->
   <script type="module" src="app.js"></script>
