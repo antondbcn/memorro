@@ -145,6 +145,7 @@ input { font-family: inherit; }
   perspective: 900px;
   margin-top: auto;
   margin-bottom: auto;
+  cursor: pointer;
 }
 
 .card-flipper {
@@ -194,86 +195,43 @@ input { font-family: inherit; }
   word-break: break-word;
 }
 
-/* FLIP BUTTON */
-.flip-prompt {
-  position: absolute;
-  bottom: 32px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  justify-content: center;
-  width: calc(100% - 48px);
-  max-width: 420px;
-}
-
-.btn-flip {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: var(--radius-md);
-  padding: 14px 36px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  transition: background var(--transition), transform var(--transition);
-}
-
-.btn-flip:hover {
-  background: var(--surface-alt);
-  transform: translateY(-1px);
-}
-
-.btn-flip:active {
-  transform: translateY(0);
-}
-
-/* RATING BUTTONS */
+/* RATING BUTTONS – satisfaction panel style */
 .rating-area {
   position: absolute;
   bottom: 32px;
-  left: 24px;
-  right: 24px;
-  width: calc(100% - 48px);
-  max-width: 420px;
   left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+  width: calc(100% - 48px);
+  max-width: 420px;
 }
-
 
 .rating-buttons {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
   width: 100%;
 }
 
 .btn-rating {
-  background: var(--surface);
-  border: 1px solid rgba(255,255,255,0.08);
+  aspect-ratio: 1;
+  border: none;
   border-radius: var(--radius-md);
-  padding: 14px 10px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text);
-  transition: background var(--transition), transform var(--transition);
+  font-size: 2rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, filter 0.15s ease;
+  filter: brightness(0.85);
 }
 
-.btn-rating:hover {
-  background: var(--surface-alt);
-  transform: translateY(-2px);
-}
+.btn-rating:hover  { transform: translateY(-3px) scale(1.06); filter: brightness(1); }
+.btn-rating:active { transform: scale(0.95); }
 
-.btn-rating:active {
-  transform: translateY(0);
-}
-
-.btn-rating[data-rating="perfect"]:hover { border-color: var(--success); color: var(--success); }
-.btn-rating[data-rating="good"]:hover    { border-color: #5BC0EB; color: #5BC0EB; }
-.btn-rating[data-rating="ok"]:hover      { border-color: var(--warning); color: var(--warning); }
-.btn-rating[data-rating="bad"]:hover     { border-color: var(--accent); color: var(--accent); }
+.btn-rating[data-rating="perfect"] { background: #2E7D52; }
+.btn-rating[data-rating="good"]    { background: #1A5C8A; }
+.btn-rating[data-rating="ok"]      { background: #A07800; }
+.btn-rating[data-rating="bad"]     { background: #8B1A2A; }
 
 /* ═══════════════════════════════════════════════════════
    EDIT VIEW

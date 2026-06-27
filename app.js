@@ -169,8 +169,6 @@ class App {
     this.$cardFlipper    = document.getElementById("card-flipper");
     this.$cardFrontText  = document.getElementById("card-front-text");
     this.$cardBackText   = document.getElementById("card-back-text");
-    this.$flipPrompt     = document.getElementById("flip-prompt");
-    this.$btnFlip        = document.getElementById("btn-flip");
     this.$ratingArea     = document.getElementById("rating-area");
     this.$reviewEmpty    = document.getElementById("review-empty");
 
@@ -207,8 +205,21 @@ class App {
       btn.addEventListener("click", () => this._navigateTo(btn.dataset.view));
     });
 
-    // Review: voltear
-    this.$btnFlip.addEventListener("click", () => this._flipCard());
+    // Review: voltear con clic en tarjeta o teclado
+    this.$cardScene.addEventListener("click", () => {
+      if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.code === "Space" || e.code === "Enter") {
+        // Solo en la vista de review y si no hay modal abierto
+        if (!this.$views.review.classList.contains("hidden") &&
+            this.$modalOverlay.classList.contains("hidden") &&
+            !this.$cardFlipper.classList.contains("flipped")) {
+          e.preventDefault();
+          this._flipCard();
+        }
+      }
+    });
 
     // Review: valorar
     document.querySelectorAll(".btn-rating").forEach(btn => {
@@ -289,7 +300,6 @@ class App {
 
     if (!this._session.hasCards) {
       this.$cardScene.classList.add("hidden");
-      this.$flipPrompt.classList.add("hidden");
       this.$reviewEmpty.classList.remove("hidden");
       return;
     }
@@ -301,12 +311,10 @@ class App {
     this.$cardBackText.textContent  = card.back;
 
     this.$cardScene.classList.remove("hidden");
-    this.$flipPrompt.classList.remove("hidden");
   }
 
   _flipCard() {
     this.$cardFlipper.classList.add("flipped");
-    this.$flipPrompt.classList.add("hidden");
     // Mostrar valoración tras la animación
     setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
   }
