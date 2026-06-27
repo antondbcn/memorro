@@ -129,12 +129,13 @@ input { font-family: inherit; }
 ═══════════════════════════════════════════════════════ */
 .review-area {
   flex: 1;
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 24px;
-  gap: 32px;
+  /* Card sits in the upper-centre zone; controls are pinned to the bottom */
+  justify-content: flex-start;
+  padding: 32px 24px 180px; /* bottom padding reserves space for controls */
 }
 
 /* 3-D CARD FLIP */
@@ -142,6 +143,8 @@ input { font-family: inherit; }
   width: 100%;
   max-width: 420px;
   perspective: 900px;
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 .card-flipper {
@@ -164,10 +167,9 @@ input { font-family: inherit; }
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-lg);
-  padding: 28px 24px 20px;
+  padding: 24px;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  gap: 12px;
   box-shadow: var(--shadow);
 }
 
@@ -182,18 +184,6 @@ input { font-family: inherit; }
   transform: rotateY(180deg);
 }
 
-.face-label {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  align-self: flex-start;
-}
-
-.card-back .face-label {
-  color: var(--accent);
-}
 
 .card-face p {
   font-size: 1.2rem;
@@ -206,8 +196,14 @@ input { font-family: inherit; }
 
 /* FLIP BUTTON */
 .flip-prompt {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   justify-content: center;
+  width: calc(100% - 48px);
+  max-width: 420px;
 }
 
 .btn-flip {
@@ -232,21 +228,20 @@ input { font-family: inherit; }
 
 /* RATING BUTTONS */
 .rating-area {
+  position: absolute;
+  bottom: 32px;
+  left: 24px;
+  right: 24px;
+  width: calc(100% - 48px);
+  max-width: 420px;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  width: 100%;
-  max-width: 420px;
+  gap: 10px;
 }
 
-.rating-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-}
 
 .rating-buttons {
   display: grid;
