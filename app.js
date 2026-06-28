@@ -7,6 +7,14 @@ import { getFirestore, collection, getDocs,
          addDoc, updateDoc, deleteDoc,
          doc, serverTimestamp }       from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONSTANTES DEL ALGORITMO DE REPASO
+// ═══════════════════════════════════════════════════════════════════════════
+const COOLDOWN_MAX    = 10;   // Turnos de bloqueo al mostrar una tarjeta
+const PERFECT_RATIO   = 7;    // 1 de cada N turnos se elige entre perfectas (weight=1)
+const INITIAL_WEIGHT  = 5;    // Peso inicial de una tarjeta nueva
+const RATING_DELTA    = { perfect: 0, good: 1, ok: 2, bad: 3 }; // Δweight por valoración
+
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
   authDomain: "memorro-b4939.firebaseapp.com",
@@ -22,23 +30,29 @@ const firebaseConfig = {
 // ═══════════════════════════════════════════════════════════════════════════
 class Card {
   /**
-   * @param {string} id       – ID del documento en Firestore (vacío si es nueva)
-   * @param {string} front    – Texto del frente
-   * @param {string} back     – Texto del dorso
+   * @param {string}    id        – ID del documento en Firestore (vacío si es nueva)
+   * @param {string}    front     – Texto del frente
+   * @param {string}    back      – Texto del dorso
+   * @param {number}    weight    – Peso para la selección ponderada (mín. 1 = "perfecta")
    * @param {Date|null} createdAt
    */
-  constructor(id, front, back, createdAt = null) {
+  constructor(id, front, back, weight = INITIAL_WEIGHT, createdAt = null) {
     this.id        = id;
     this.front     = front.trim();
     this.back      = back.trim();
+    this.weight    = Math.max(1, weight);  // nunca por debajo de 1
+    this.cooldown  = 0;                    // solo en memoria; se resetea al arrancar
     this.createdAt = createdAt ?? new Date();
   }
+
+  get isPerfect() { return this.weight === 1; }
 
   /** Datos planos para guardar en Firestore (sin el id) */
   toFirestore() {
     return {
       front:     this.front,
       back:      this.back,
+      weight:    this.weight,
       createdAt: serverTimestamp(),
     };
   }
@@ -50,6 +64,7 @@ class Card {
       snapshot.id,
       d.front  ?? "",
       d.back   ?? "",
+      d.weight ?? INITIAL_WEIGHT,
       d.createdAt?.toDate() ?? null,
     );
   }
@@ -89,10 +104,10 @@ class CardRepository {
     return card;
   }
 
-  /** Actualiza frente y dorso de una tarjeta existente. */
+  /** Actualiza frente, dorso y weight de una tarjeta existente. */
   async update(card) {
     const ref = doc(this._db, this._col.path, card.id);
-    await updateDoc(ref, { front: card.front, back: card.back });
+    await updateDoc(ref, { front: card.front, back: card.back, weight: card.weight });
   }
 
   /** Elimina una tarjeta por su id. */
@@ -104,37 +119,98 @@ class CardRepository {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: ReviewSession
-//  Controla el flujo de repaso: elegir tarjeta, registrar resultado.
+//  Controla el flujo de repaso: selección ponderada con cooldown.
 // ═══════════════════════════════════════════════════════════════════════════
 class ReviewSession {
   /** @param {Card[]} cards */
   constructor(cards) {
     this._cards   = [...cards];
     this._current = null;
+    this._turn    = 0;   // contador global de turnos (para PERFECT_RATIO)
   }
 
   get hasCards() { return this._cards.length > 0; }
 
-  /** Elige una tarjeta al azar y la devuelve */
-  pickRandom() {
+  /**
+   * Elige la siguiente tarjeta según el algoritmo:
+   * - Cada PERFECT_RATIO turnos se elige al azar entre las perfectas (weight=1).
+   * - El resto de turnos se elige ponderado por weight entre las no perfectas.
+   * - Las tarjetas con cooldown > 0 se excluyen, salvo que no quede ninguna elegible.
+   */
+  pick() {
     if (!this.hasCards) return null;
-    const idx      = Math.floor(Math.random() * this._cards.length);
-    this._current  = this._cards[idx];
+
+    // Decrementar cooldown de todas las tarjetas (excepto la que se acaba de mostrar,
+    // cuyo cooldown se fija en _rateCard justo antes de llamar a pick de nuevo)
+    this._cards.forEach(c => { if (c.cooldown > 0) c.cooldown--; });
+
+    const showPerfect = (this._turn % PERFECT_RATIO === 0);
+    this._turn++;
+
+    let pool;
+
+    if (showPerfect) {
+      pool = this._availablePool(c => c.isPerfect);
+      // Si no hay perfectas disponibles, caemos a no-perfectas
+      if (pool.length === 0) pool = this._availablePool(c => !c.isPerfect);
+    } else {
+      pool = this._availablePool(c => !c.isPerfect);
+      // Si no hay no-perfectas disponibles, usamos perfectas
+      if (pool.length === 0) pool = this._availablePool(c => c.isPerfect);
+    }
+
+    // Si aun así no hay nada (todas en cooldown), ignoramos el cooldown por completo
+    if (pool.length === 0) {
+      pool = showPerfect
+        ? this._cards.filter(c =>  c.isPerfect)
+        : this._cards.filter(c => !c.isPerfect);
+      if (pool.length === 0) pool = [...this._cards];
+    }
+
+    this._current = this._weightedRandom(pool);
+    this._current.cooldown = COOLDOWN_MAX;
     return this._current;
   }
 
   /**
-   * Registra la valoración del usuario sobre la tarjeta actual.
-   * Por ahora solo devuelve el objeto; aquí se podrá añadir lógica de SM-2 etc.
+   * Registra la valoración: ajusta weight y persiste en Firestore a través del
+   * callback que le inyecta App.
    * @param {"perfect"|"good"|"ok"|"bad"} rating
+   * @returns {{ card: Card, delta: number }}
    */
   recordRating(rating) {
-    return { card: this._current, rating };
+    const delta = RATING_DELTA[rating] ?? 0;
+    if (this._current && delta > 0) {
+      this._current.weight = Math.max(1, this._current.weight + delta);
+    }
+    return { card: this._current, delta };
   }
 
-  /** Permite actualizar el pool de tarjetas sin crear una sesión nueva */
+  /** Permite actualizar el pool sin crear una sesión nueva */
   updateCards(cards) {
-    this._cards = [...cards];
+    // Conservar cooldowns existentes al recargar
+    const cooldownMap = new Map(this._cards.map(c => [c.id, c.cooldown]));
+    this._cards = cards.map(c => {
+      c.cooldown = cooldownMap.get(c.id) ?? 0;
+      return c;
+    });
+  }
+
+  // ─── Helpers privados ────────────────────────────────────────────────
+  /** Filtra por predicado y excluye las que tienen cooldown > 0 */
+  _availablePool(predicate) {
+    return this._cards.filter(c => predicate(c) && c.cooldown === 0);
+  }
+
+  /** Selección aleatoria ponderada por weight */
+  _weightedRandom(pool) {
+    const total = pool.reduce((sum, c) => sum + c.weight, 0);
+    let r = Math.random() * total;
+    for (const card of pool) {
+      r -= card.weight;
+      if (r <= 0) return card;
+    }
+    return pool[pool.length - 1];
   }
 }
 
@@ -306,7 +382,7 @@ class App {
 
     this.$reviewEmpty.classList.add("hidden");
 
-    const card = this._session.pickRandom();
+    const card = this._session.pick();
     this.$cardFrontText.textContent = card.front;
     this.$cardBackText.textContent  = card.back;
 
@@ -319,8 +395,21 @@ class App {
     setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
   }
 
-  _rateCard(rating) {
-    this._session.recordRating(rating);
+  async _rateCard(rating) {
+    // Aplicar -1 por haberla mostrado (siempre), luego recordRating aplica el delta
+    const card = this._session._current;
+    if (card) {
+      card.weight = Math.max(1, card.weight - 1);
+    }
+    const { card: ratedCard } = this._session.recordRating(rating);
+
+    // Persistir weight en Firestore de forma asíncrona (sin bloquear la UI)
+    if (ratedCard) {
+      this._repo.update(ratedCard).catch(err =>
+        console.error("Error persistiendo weight:", err)
+      );
+    }
+
     // Pequeña pausa visual antes de la siguiente tarjeta
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
