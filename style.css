@@ -133,9 +133,8 @@ input { font-family: inherit; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  /* Card sits in the upper-centre zone; controls are pinned to the bottom */
   justify-content: flex-start;
-  padding: 32px 24px 180px; /* bottom padding reserves space for controls */
+  padding: 32px 24px 180px;
 }
 
 /* 3-D CARD FLIP */
@@ -151,7 +150,7 @@ input { font-family: inherit; }
 .card-flipper {
   position: relative;
   width: 100%;
-  padding-top: 62%;          /* aspect ratio */
+  padding-top: 62%;
   transform-style: preserve-3d;
   transition: transform 0.55s cubic-bezier(0.45, 0.05, 0.55, 0.95);
 }
@@ -185,7 +184,6 @@ input { font-family: inherit; }
   transform: rotateY(180deg);
 }
 
-
 .card-face p {
   font-size: 1.2rem;
   font-weight: 500;
@@ -195,7 +193,7 @@ input { font-family: inherit; }
   word-break: break-word;
 }
 
-/* RATING BUTTONS – satisfaction panel style */
+/* RATING BUTTONS */
 .rating-area {
   position: absolute;
   bottom: 32px;
@@ -304,10 +302,42 @@ input { font-family: inherit; }
 }
 
 /* ═══════════════════════════════════════════════════════
-   ADD VIEW
+   ADD VIEW – TABS
+═══════════════════════════════════════════════════════ */
+.add-tabs {
+  display: flex;
+  margin: 0 24px 20px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.add-tab {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: calc(var(--radius-md) - 4px);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  transition: background var(--transition), color var(--transition);
+}
+
+.add-tab.active {
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+.add-tab:hover:not(.active) {
+  color: var(--text);
+}
+
+/* ═══════════════════════════════════════════════════════
+   ADD VIEW – FORMS
 ═══════════════════════════════════════════════════════ */
 .card-form {
-  padding: 8px 24px 24px;
+  padding: 0 24px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -336,6 +366,14 @@ input { font-family: inherit; }
 
 .form-textarea:focus {
   border-color: var(--accent);
+}
+
+/* Batch textarea – taller to show several pairs */
+.batch-textarea {
+  min-height: 200px;
+  font-size: 0.88rem;
+  line-height: 1.7;
+  font-family: 'Space Grotesk', monospace;
 }
 
 /* TOGGLE */
