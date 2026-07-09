@@ -285,6 +285,9 @@ class App {
       btn.addEventListener("click", () => this._rateCard(btn.dataset.rating === "success"));
     });
 
+    // Review: valorar mediante swipe (móvil) — derecha = acierto, izquierda = fallo
+    this._bindSwipeGesture();
+
     // Edit: filtro con debounce
     this.$searchInput.addEventListener("input", () => {
       clearTimeout(this._filterDebounceTimer);
@@ -403,6 +406,65 @@ class App {
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
+  }
+
+  // ─── Gesto de swipe en la tarjeta volteada ────────────────────────────
+  // Derecha = acierto ("right" = correcto), izquierda = fallo.
+  _bindSwipeGesture() {
+    const SWIPE_THRESHOLD = 80; // px de arrastre para confirmar la valoración
+    const TILT_FACTOR     = 20; // divisor para la rotación de la tarjeta arrastrada
+
+    let dragging = false;
+    let startX   = 0;
+    let currentX = 0;
+
+    const getX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
+
+    // Solo se puede valorar por swipe cuando la tarjeta ya está volteada
+    // y los botones de valoración son visibles.
+    const canSwipe = () =>
+      this.$cardFlipper.classList.contains("flipped") &&
+      !this.$ratingArea.classList.contains("hidden");
+
+    const onStart = (e) => {
+      if (!canSwipe()) return;
+      dragging = true;
+      startX = currentX = getX(e);
+      this.$cardFlipper.style.transition = "none";
+    };
+
+    const onMove = (e) => {
+      if (!dragging) return;
+      currentX = getX(e);
+      const dx = currentX - startX;
+      this.$cardFlipper.style.transform =
+        `rotateY(180deg) translateX(${dx}px) rotate(${dx / TILT_FACTOR}deg)`;
+      this.$cardScene.classList.toggle("swipe-success", dx >  SWIPE_THRESHOLD * 0.4);
+      this.$cardScene.classList.toggle("swipe-fail",     dx < -SWIPE_THRESHOLD * 0.4);
+    };
+
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      const dx = currentX - startX;
+
+      this.$cardFlipper.style.transition = "";
+      this.$cardFlipper.style.transform  = "";
+      this.$cardScene.classList.remove("swipe-success", "swipe-fail");
+
+      if (Math.abs(dx) > SWIPE_THRESHOLD) {
+        this._rateCard(dx > 0); // derecha = acierto, izquierda = fallo
+      }
+    };
+
+    this.$cardScene.addEventListener("touchstart", onStart, { passive: true });
+    this.$cardScene.addEventListener("touchmove",  onMove,  { passive: true });
+    this.$cardScene.addEventListener("touchend",   onEnd);
+
+    // Soporte también con ratón (útil al probar en escritorio)
+    this.$cardScene.addEventListener("mousedown", onStart);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup",   onEnd);
   }
 
   // ═══════════════════════════════════════════════════════════════════════

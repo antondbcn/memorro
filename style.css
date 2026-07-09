@@ -146,6 +146,7 @@ input { font-family: inherit; }
   margin-top: auto;
   margin-bottom: auto;
   cursor: pointer;
+  touch-action: pan-y; /* permite scroll vertical pero deja libre el swipe horizontal */
 }
 
 .card-flipper {
@@ -183,6 +184,17 @@ input { font-family: inherit; }
   background: var(--surface-alt);
   border: 1px solid rgba(233,69,96,0.25);
   transform: rotateY(180deg);
+}
+
+/* SWIPE FEEDBACK (móvil): arrastrar la tarjeta volteada indica la valoración */
+.card-scene.swipe-success .card-back {
+  border-color: rgba(76,175,130,0.6);
+  box-shadow: 0 0 0 3px rgba(76,175,130,0.35), var(--shadow);
+}
+
+.card-scene.swipe-fail .card-back {
+  border-color: rgba(233,69,96,0.6);
+  box-shadow: 0 0 0 3px rgba(233,69,96,0.4), var(--shadow);
 }
 
 
