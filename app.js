@@ -147,25 +147,29 @@ class ReviewSession {
 
   /**
    * Elige la tarjeta más vencida (mayor tiempo transcurrido desde que tocaba
-   * repasarla). Devuelve null si ninguna tarjeta está vencida todavía.
+   * repasarla). Si varias tarjetas están vencidas por igual (mismo número de
+   * minutos completos de retraso — típico al importar varias tarjetas nuevas
+   * a la vez), se elige al azar entre ellas. Devuelve null si ninguna tarjeta
+   * está vencida todavía.
    */
   pick() {
     if (!this.hasCards) return null;
 
     const now = new Date();
-    let best        = null;
-    let bestOverdue = -Infinity;
+    const due = this._cards
+      .map(card => ({ card, overdueMin: Math.floor((now - card.dueAt) / 60000) }))
+      .filter(x => x.overdueMin >= 0);
 
-    for (const card of this._cards) {
-      const overdue = now - card.dueAt;   // ms; negativo si aún no toca
-      if (overdue >= 0 && overdue > bestOverdue) {
-        best        = card;
-        bestOverdue = overdue;
-      }
+    if (due.length === 0) {
+      this._current = null;
+      return null;
     }
 
-    this._current = best;   // null si nada está vencido
-    return best;
+    const maxOverdue = Math.max(...due.map(x => x.overdueMin));
+    const tied        = due.filter(x => x.overdueMin === maxOverdue);
+
+    this._current = tied[Math.floor(Math.random() * tied.length)].card;
+    return this._current;
   }
 
   /**
