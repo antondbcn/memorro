@@ -1,18 +1,21 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  FIREBASE CONFIG
+//  Sustituye estos valores por los de tu proyecto en Firebase Console.
 // ═══════════════════════════════════════════════════════════════════════════
 import { initializeApp }              from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs,
          addDoc, updateDoc, deleteDoc,
-         doc, serverTimestamp }       from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+         doc, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CONSTANTES DEL ALGORITMO DE REPASO
+//  Modelo de curva de olvido por tarjeta: cada tarjeta tiene un intervalo H
+//  (en minutos) que se dobla al acertar y se reduce a la mitad al fallar.
 // ═══════════════════════════════════════════════════════════════════════════
-const COOLDOWN_MAX    = 10;
-const PERFECT_RATIO   = 7;
-const INITIAL_WEIGHT  = 5;
-const RATING_DELTA    = { perfect: 0, good: 1, ok: 2, bad: 3 };
+const INITIAL_INTERVAL_MIN = 5;    // minutos: intervalo inicial de una tarjeta nueva
+const MIN_INTERVAL_MIN     = 1;    // minutos: suelo mínimo del intervalo
+const SUCCESS_MULTIPLIER   = 2;    // al acertar, el intervalo se multiplica por esto
+const FAILURE_MULTIPLIER   = 0.5;  // al fallar, el intervalo se multiplica por esto
 
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
@@ -25,39 +28,58 @@ const firebaseConfig = {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: Card
+//  Modelo de datos de una tarjeta. No tiene lógica de UI.
 // ═══════════════════════════════════════════════════════════════════════════
 class Card {
-  constructor(id, front, back, weight = INITIAL_WEIGHT, createdAt = null) {
-    this.id        = id;
-    this.front     = front.trim();
-    this.back      = back.trim();
-    this.weight    = Math.max(1, weight);
-    this.cooldown  = 0;
-    this.createdAt = createdAt ?? new Date();
+  /**
+   * @param {string}    id        – ID del documento en Firestore (vacío si es nueva)
+   * @param {string}    front     – Texto del frente
+   * @param {string}    back      – Texto del dorso
+   * @param {number}    interval  – Intervalo H en minutos hasta el próximo repaso ideal
+   * @param {Date|null} lastReviewed – Fecha del último repaso (null si nunca se ha repasado)
+   * @param {Date|null} createdAt
+   */
+  constructor(id, front, back, interval = INITIAL_INTERVAL_MIN, lastReviewed = null, createdAt = null) {
+    this.id           = id;
+    this.front        = front.trim();
+    this.back         = back.trim();
+    this.interval     = Math.max(MIN_INTERVAL_MIN, interval);
+    this.lastReviewed = lastReviewed;      // Date | null
+    this.createdAt    = createdAt ?? new Date();
   }
 
-  get isPerfect() { return this.weight === 1; }
+  /** Momento en que la tarjeta "vence" (toca repasarla).
+   *  Si nunca se ha repasado, está vencida desde su creación. */
+  get dueAt() {
+    if (!this.lastReviewed) return this.createdAt;
+    return new Date(this.lastReviewed.getTime() + this.interval * 60000);
+  }
 
+  /** Datos planos para guardar en Firestore (sin el id) */
   toFirestore() {
     return {
-      front:     this.front,
-      back:      this.back,
-      weight:    this.weight,
-      createdAt: serverTimestamp(),
+      front:        this.front,
+      back:         this.back,
+      interval:     this.interval,
+      lastReviewed: this.lastReviewed ? Timestamp.fromDate(this.lastReviewed) : null,
+      createdAt:    serverTimestamp(),
     };
   }
 
+  /** Construye un Card desde un DocumentSnapshot de Firestore */
   static fromFirestore(snapshot) {
     const d = snapshot.data();
     return new Card(
       snapshot.id,
-      d.front  ?? "",
-      d.back   ?? "",
-      d.weight ?? INITIAL_WEIGHT,
+      d.front    ?? "",
+      d.back     ?? "",
+      d.interval ?? INITIAL_INTERVAL_MIN,
+      d.lastReviewed ? d.lastReviewed.toDate() : null,
       d.createdAt?.toDate() ?? null,
     );
   }
 
+  /** Devuelve true si el texto de filtro aparece en frente o dorso */
   matches(filter) {
     const q = filter.toLowerCase();
     return this.front.toLowerCase().includes(q)
@@ -67,29 +89,43 @@ class Card {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: CardRepository
+//  Toda la interacción con Firestore pasa por aquí.
 // ═══════════════════════════════════════════════════════════════════════════
 class CardRepository {
+  /**
+   * @param {import("firebase/firestore").Firestore} db
+   * @param {string} collectionName
+   */
   constructor(db, collectionName = "cards") {
     this._db  = db;
     this._col = collection(db, collectionName);
   }
 
+  /** Carga todas las tarjetas de Firestore → Array<Card> */
   async fetchAll() {
     const snap = await getDocs(this._col);
     return snap.docs.map(Card.fromFirestore);
   }
 
+  /** Guarda una nueva tarjeta. Devuelve la Card con el id asignado. */
   async add(card) {
     const ref = await addDoc(this._col, card.toFirestore());
     card.id = ref.id;
     return card;
   }
 
+  /** Actualiza frente, dorso, intervalo y fecha de último repaso de una tarjeta existente. */
   async update(card) {
     const ref = doc(this._db, this._col.path, card.id);
-    await updateDoc(ref, { front: card.front, back: card.back, weight: card.weight });
+    await updateDoc(ref, {
+      front:        card.front,
+      back:         card.back,
+      interval:     card.interval,
+      lastReviewed: card.lastReviewed ? Timestamp.fromDate(card.lastReviewed) : null,
+    });
   }
 
+  /** Elimina una tarjeta por su id. */
   async remove(cardId) {
     const ref = doc(this._db, this._col.path, cardId);
     await deleteDoc(ref);
@@ -98,92 +134,81 @@ class CardRepository {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: ReviewSession
+//  Controla el flujo de repaso: selección por tarjeta más vencida según H.
 // ═══════════════════════════════════════════════════════════════════════════
 class ReviewSession {
+  /** @param {Card[]} cards */
   constructor(cards) {
     this._cards   = [...cards];
     this._current = null;
-    this._turn    = 0;
   }
 
   get hasCards() { return this._cards.length > 0; }
 
+  /**
+   * Elige la tarjeta más vencida (mayor tiempo transcurrido desde que tocaba
+   * repasarla). Devuelve null si ninguna tarjeta está vencida todavía.
+   */
   pick() {
     if (!this.hasCards) return null;
 
-    this._cards.forEach(c => { if (c.cooldown > 0) c.cooldown--; });
+    const now = new Date();
+    let best        = null;
+    let bestOverdue = -Infinity;
 
-    const showPerfect = (this._turn % PERFECT_RATIO === 0);
-    this._turn++;
-
-    let pool;
-
-    if (showPerfect) {
-      pool = this._availablePool(c => c.isPerfect);
-      if (pool.length === 0) pool = this._availablePool(c => !c.isPerfect);
-    } else {
-      pool = this._availablePool(c => !c.isPerfect);
-      if (pool.length === 0) pool = this._availablePool(c => c.isPerfect);
+    for (const card of this._cards) {
+      const overdue = now - card.dueAt;   // ms; negativo si aún no toca
+      if (overdue >= 0 && overdue > bestOverdue) {
+        best        = card;
+        bestOverdue = overdue;
+      }
     }
 
-    if (pool.length === 0) {
-      pool = showPerfect
-        ? this._cards.filter(c =>  c.isPerfect)
-        : this._cards.filter(c => !c.isPerfect);
-      if (pool.length === 0) pool = [...this._cards];
-    }
-
-    this._current = this._weightedRandom(pool);
-    this._current.cooldown = COOLDOWN_MAX;
-    return this._current;
+    this._current = best;   // null si nada está vencido
+    return best;
   }
 
-  recordRating(rating) {
-    const delta = RATING_DELTA[rating] ?? 0;
-    if (this._current && delta > 0) {
-      this._current.weight = Math.max(1, this._current.weight + delta);
-    }
-    return { card: this._current, delta };
+  /**
+   * Registra el resultado del repaso: ajusta el intervalo (×2 si acierto,
+   * ÷2 si fallo, con suelo mínimo) y resetea la fecha de último repaso.
+   * @param {boolean} success
+   * @returns {Card|null} la tarjeta actualizada
+   */
+  recordRating(success) {
+    const card = this._current;
+    if (!card) return null;
+
+    card.interval = success
+      ? card.interval * SUCCESS_MULTIPLIER
+      : Math.max(MIN_INTERVAL_MIN, card.interval * FAILURE_MULTIPLIER);
+    card.lastReviewed = new Date();
+
+    return card;
   }
 
+  /** Permite actualizar el pool sin crear una sesión nueva */
   updateCards(cards) {
-    const cooldownMap = new Map(this._cards.map(c => [c.id, c.cooldown]));
-    this._cards = cards.map(c => {
-      c.cooldown = cooldownMap.get(c.id) ?? 0;
-      return c;
-    });
-  }
-
-  _availablePool(predicate) {
-    return this._cards.filter(c => predicate(c) && c.cooldown === 0);
-  }
-
-  _weightedRandom(pool) {
-    const total = pool.reduce((sum, c) => sum + c.weight, 0);
-    let r = Math.random() * total;
-    for (const card of pool) {
-      r -= card.weight;
-      if (r <= 0) return card;
-    }
-    return pool[pool.length - 1];
+    this._cards = cards;
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: App
+//  Controlador principal: coordina vistas, repositorio y sesión.
 // ═══════════════════════════════════════════════════════════════════════════
 class App {
   constructor(repository) {
     this._repo    = repository;
-    this._cards   = [];
+    this._cards   = [];          // caché local
     this._session = new ReviewSession([]);
-    this._editingCard = null;
+    this._editingCard = null;    // tarjeta abierta en el modal
     this._filterDebounceTimer = null;
 
     this._bindDOM();
     this._bindEvents();
   }
 
+  // ─── Cachés de elementos DOM ──────────────────────────────────────────
   _bindDOM() {
     // Views
     this.$views = {
@@ -200,6 +225,7 @@ class App {
     this.$cardBackText   = document.getElementById("card-back-text");
     this.$ratingArea     = document.getElementById("rating-area");
     this.$reviewEmpty    = document.getElementById("review-empty");
+    this.$reviewWaiting  = document.getElementById("review-waiting");
 
     // Edit
     this.$editCount      = document.getElementById("edit-count");
@@ -207,23 +233,12 @@ class App {
     this.$cardList       = document.getElementById("card-list");
     this.$editEmpty      = document.getElementById("edit-empty");
 
-    // Add – tabs
-    this.$addTabs        = document.querySelectorAll(".add-tab");
-    this.$formSingle     = document.getElementById("add-form-single");
-    this.$formBatch      = document.getElementById("add-form-batch");
-
-    // Add – single
+    // Add
     this.$addFront       = document.getElementById("add-front");
     this.$addBack        = document.getElementById("add-back");
     this.$addDouble      = document.getElementById("add-double");
     this.$btnAddSave     = document.getElementById("btn-add-save");
     this.$addFeedback    = document.getElementById("add-feedback");
-
-    // Add – batch
-    this.$batchInput     = document.getElementById("batch-input");
-    this.$batchDouble    = document.getElementById("batch-double");
-    this.$btnBatchSave   = document.getElementById("btn-batch-save");
-    this.$batchFeedback  = document.getElementById("batch-feedback");
 
     // Modal
     this.$modalOverlay   = document.getElementById("modal-overlay");
@@ -238,15 +253,11 @@ class App {
     this.$navBtns = document.querySelectorAll(".nav-btn");
   }
 
+  // ─── Event listeners ──────────────────────────────────────────────────
   _bindEvents() {
     // Navegación
     this.$navBtns.forEach(btn => {
       btn.addEventListener("click", () => this._navigateTo(btn.dataset.view));
-    });
-
-    // Add – tab switching
-    this.$addTabs.forEach(tab => {
-      tab.addEventListener("click", () => this._switchAddTab(tab.dataset.tab));
     });
 
     // Review: voltear con clic en tarjeta o teclado
@@ -255,6 +266,7 @@ class App {
     });
     document.addEventListener("keydown", (e) => {
       if (e.code === "Space" || e.code === "Enter") {
+        // Solo en la vista de review y si no hay modal abierto
         if (!this.$views.review.classList.contains("hidden") &&
             this.$modalOverlay.classList.contains("hidden") &&
             !this.$cardFlipper.classList.contains("flipped")) {
@@ -264,9 +276,9 @@ class App {
       }
     });
 
-    // Review: valorar
+    // Review: valorar (acierto/fallo)
     document.querySelectorAll(".btn-rating").forEach(btn => {
-      btn.addEventListener("click", () => this._rateCard(btn.dataset.rating));
+      btn.addEventListener("click", () => this._rateCard(btn.dataset.rating === "success"));
     });
 
     // Edit: filtro con debounce
@@ -275,11 +287,8 @@ class App {
       this._filterDebounceTimer = setTimeout(() => this._renderCardList(), 800);
     });
 
-    // Add single: guardar
+    // Add: guardar
     this.$btnAddSave.addEventListener("click", () => this._addCard());
-
-    // Add batch: guardar
-    this.$btnBatchSave.addEventListener("click", () => this._addBatch());
 
     // Modal: cerrar
     this.$btnModalClose.addEventListener("click", () => this._closeModal());
@@ -306,32 +315,29 @@ class App {
 
   // ─── Navegación ───────────────────────────────────────────────────────
   _navigateTo(viewName) {
+    // Actualizar nav buttons
     this.$navBtns.forEach(btn => {
       btn.classList.toggle("active", btn.dataset.view === viewName);
     });
 
+    // Mostrar/ocultar vistas
     Object.entries(this.$views).forEach(([name, el]) => {
       el.classList.toggle("hidden", name !== viewName);
     });
 
+    // Al abrir "edit" renderizamos la lista
     if (viewName === "edit") {
       this.$searchInput.value = "";
       this._renderCardList();
     }
 
+    // Al abrir "review" preparamos la siguiente tarjeta
     if (viewName === "review") {
       this._renderReview();
     }
   }
 
-  // ─── Tab switching en vista Añadir ────────────────────────────────────
-  _switchAddTab(tabName) {
-    this.$addTabs.forEach(t => t.classList.toggle("active", t.dataset.tab === tabName));
-    this.$formSingle.classList.toggle("hidden", tabName !== "single");
-    this.$formBatch.classList.toggle("hidden",  tabName !== "batch");
-  }
-
-  // ─── Badges ───────────────────────────────────────────────────────────
+  // ─── Badges de contador ───────────────────────────────────────────────
   _updateBadges() {
     const n = this._cards.length;
     const label = n === 1 ? "1 tarjeta" : `${n} tarjetas`;
@@ -343,11 +349,13 @@ class App {
   //  VIEW: REVIEW
   // ═══════════════════════════════════════════════════════════════════════
   _renderReview() {
+    // Resetear estado visual
     this.$cardFlipper.classList.remove("flipped");
     this.$ratingArea.classList.add("hidden");
 
     if (!this._session.hasCards) {
       this.$cardScene.classList.add("hidden");
+      this.$reviewWaiting.classList.add("hidden");
       this.$reviewEmpty.classList.remove("hidden");
       return;
     }
@@ -355,6 +363,15 @@ class App {
     this.$reviewEmpty.classList.add("hidden");
 
     const card = this._session.pick();
+
+    if (!card) {
+      // Ninguna tarjeta está vencida todavía
+      this.$cardScene.classList.add("hidden");
+      this.$reviewWaiting.classList.remove("hidden");
+      return;
+    }
+
+    this.$reviewWaiting.classList.add("hidden");
     this.$cardFrontText.textContent = card.front;
     this.$cardBackText.textContent  = card.back;
 
@@ -363,22 +380,22 @@ class App {
 
   _flipCard() {
     this.$cardFlipper.classList.add("flipped");
+    // Mostrar valoración tras la animación
     setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
   }
 
-  async _rateCard(rating) {
-    const card = this._session._current;
-    if (card) {
-      card.weight = Math.max(1, card.weight - 1);
-    }
-    const { card: ratedCard } = this._session.recordRating(rating);
+  /** @param {boolean} success – true si acierto, false si fallo */
+  async _rateCard(success) {
+    const ratedCard = this._session.recordRating(success);
 
+    // Persistir el nuevo intervalo en Firestore de forma asíncrona (sin bloquear la UI)
     if (ratedCard) {
       this._repo.update(ratedCard).catch(err =>
-        console.error("Error persistiendo weight:", err)
+        console.error("Error persistiendo intervalo:", err)
       );
     }
 
+    // Pequeña pausa visual antes de la siguiente tarjeta
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
@@ -415,7 +432,7 @@ class App {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  MODAL
+  //  MODAL: Edit / Delete
   // ═══════════════════════════════════════════════════════════════════════
   _openModal(card) {
     this._editingCard         = card;
@@ -471,7 +488,7 @@ class App {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  VIEW: ADD – SINGLE
+  //  VIEW: ADD
   // ═══════════════════════════════════════════════════════════════════════
   async _addCard() {
     const front  = this.$addFront.value.trim();
@@ -495,6 +512,7 @@ class App {
       this._session.updateCards(this._cards);
       this._updateBadges();
 
+      // Limpiar formulario
       this.$addFront.value = "";
       this.$addBack.value  = "";
       this.$addDouble.checked = true;
@@ -510,69 +528,6 @@ class App {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  //  VIEW: ADD – BATCH
-  // ═══════════════════════════════════════════════════════════════════════
-  async _addBatch() {
-    const raw    = this.$batchInput.value;
-    const double = this.$batchDouble.checked;
-
-    // Parsear líneas: ignorar vacías y las que no tengan ';'
-    const pairs = raw
-      .split("\n")
-      .map(line => line.trim())
-      .filter(line => line.includes(";"))
-      .map(line => {
-        const idx   = line.indexOf(";");
-        const front = line.slice(0, idx).trim();
-        const back  = line.slice(idx + 1).trim();
-        return { front, back };
-      })
-      .filter(({ front, back }) => front && back);
-
-    if (pairs.length === 0) {
-      this._showFeedback(
-        this.$batchFeedback,
-        "No se encontraron pares válidos. Usa el formato «término;traducción».",
-        "error"
-      );
-      return;
-    }
-
-    // Deshabilitar botón mientras se guardan
-    this.$btnBatchSave.disabled = true;
-    this.$btnBatchSave.textContent = "Guardando…";
-
-    try {
-      let created = 0;
-      for (const { front, back } of pairs) {
-        const cards = [new Card("", front, back)];
-        if (double) cards.push(new Card("", back, front));
-
-        for (const card of cards) {
-          await this._repo.add(card);
-          this._cards.push(card);
-          created++;
-        }
-      }
-
-      this._session.updateCards(this._cards);
-      this._updateBadges();
-
-      this.$batchInput.value = "";
-
-      const msg = `✓ ${created} tarjeta${created !== 1 ? "s" : ""} añadida${created !== 1 ? "s" : ""} (${pairs.length} par${pairs.length !== 1 ? "es" : ""}).`;
-      this._showFeedback(this.$batchFeedback, msg, "success");
-
-    } catch (err) {
-      this._showFeedback(this.$batchFeedback, "Error al guardar. Inténtalo de nuevo.", "error");
-      console.error(err);
-    } finally {
-      this.$btnBatchSave.disabled = false;
-      this.$btnBatchSave.textContent = "Añadir tarjetas";
-    }
-  }
-
   // ─── Helpers ──────────────────────────────────────────────────────────
   _showFeedback(el, msg, type) {
     el.textContent = msg;
@@ -581,6 +536,7 @@ class App {
     setTimeout(() => el.classList.add("hidden"), 4000);
   }
 
+  /** Escapa HTML para evitar XSS al insertar texto de tarjetas en el DOM */
   _esc(str) {
     return str
       .replace(/&/g, "&amp;")

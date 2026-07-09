@@ -26,6 +26,12 @@
         <p>No hay tarjetas todavía.<br>¡Añade algunas para empezar!</p>
       </div>
 
+      <!-- Waiting state: hay tarjetas, pero ninguna ha vencido aún -->
+      <div id="review-waiting" class="empty-state hidden">
+        <div class="empty-icon">⏳</div>
+        <p>Ninguna tarjeta está lista todavía.<br>Vuelve en unos minutos.</p>
+      </div>
+
       <!-- Card flip container -->
       <div id="card-scene" class="card-scene hidden">
         <div id="card-flipper" class="card-flipper">
@@ -41,10 +47,8 @@
       <!-- Rating buttons -->
       <div id="rating-area" class="rating-area hidden">
         <div class="rating-buttons">
-          <button class="btn-rating" data-rating="perfect" aria-label="Perfecto">😄</button>
-          <button class="btn-rating" data-rating="good"    aria-label="Bien">🙂</button>
-          <button class="btn-rating" data-rating="ok"      aria-label="Regular">😐</button>
-          <button class="btn-rating" data-rating="bad"     aria-label="Mal">😕</button>
+          <button class="btn-rating" data-rating="success" aria-label="Acierto">✅</button>
+          <button class="btn-rating" data-rating="fail"    aria-label="Fallo">❌</button>
         </div>
       </div>
     </main>
@@ -77,14 +81,7 @@
       <span class="app-title">Nueva tarjeta</span>
     </header>
 
-    <!-- Mode tabs -->
-    <div class="add-tabs">
-      <button class="add-tab active" data-tab="single">Individual</button>
-      <button class="add-tab" data-tab="batch">Por lotes</button>
-    </div>
-
-    <!-- SINGLE MODE -->
-    <form id="add-form-single" class="card-form" onsubmit="return false;">
+    <form id="add-form" class="card-form" onsubmit="return false;">
       <label class="form-label" for="add-front">Frente</label>
       <textarea id="add-front" class="form-textarea" placeholder="Escribe el frente…" rows="4"></textarea>
 
@@ -103,28 +100,6 @@
 
       <button id="btn-add-save" class="btn-primary">Añadir tarjeta</button>
       <p id="add-feedback" class="form-feedback hidden"></p>
-    </form>
-
-    <!-- BATCH MODE -->
-    <form id="add-form-batch" class="card-form hidden" onsubmit="return false;">
-      <label class="form-label" for="batch-input">Pares término;traducción</label>
-      <textarea id="batch-input" class="form-textarea batch-textarea" placeholder="die Reise;el viaje
-verlassen;abandonar
-teilnehmen;participar
-sich weigern;negarse"></textarea>
-
-      <label class="toggle-label">
-        <div class="toggle-wrap">
-          <input id="batch-double" type="checkbox" checked />
-          <span class="toggle-track">
-            <span class="toggle-thumb"></span>
-          </span>
-        </div>
-        <span>Doble (genera frente→dorso y dorso→frente)</span>
-      </label>
-
-      <button id="btn-batch-save" class="btn-primary">Añadir tarjetas</button>
-      <p id="batch-feedback" class="form-feedback hidden"></p>
     </form>
   </div>
 
