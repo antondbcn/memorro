@@ -437,8 +437,14 @@ class App {
       if (!dragging) return;
       currentX = getX(e);
       const dx = currentX - startX;
+      // El translateX/rotate deben ir ANTES de rotateY(180deg) en la cadena:
+      // como la tarjeta ya está volteada, aplicar la traslación "después" del
+      // giro invertiría visualmente el eje X (arrastrar a la derecha movería
+      // la tarjeta hacia la izquierda en pantalla). Poniendo rotateY al final
+      // (aplicado primero, en términos de composición) la traslación queda
+      // en el espacio de pantalla y el movimiento visual coincide con el dedo.
       this.$cardFlipper.style.transform =
-        `rotateY(180deg) translateX(${dx}px) rotate(${dx / TILT_FACTOR}deg)`;
+        `translateX(${dx}px) rotate(${dx / TILT_FACTOR}deg) rotateY(180deg)`;
       this.$cardScene.classList.toggle("swipe-success", dx >  SWIPE_THRESHOLD * 0.4);
       this.$cardScene.classList.toggle("swipe-fail",     dx < -SWIPE_THRESHOLD * 0.4);
     };
