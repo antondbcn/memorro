@@ -12,10 +12,11 @@ import { getFirestore, collection, getDocs,
 //  Modelo de curva de olvido por tarjeta: cada tarjeta tiene un intervalo H
 //  (en minutos) que se dobla al acertar y se reduce a la mitad al fallar.
 // ═══════════════════════════════════════════════════════════════════════════
-const INITIAL_INTERVAL_MIN = 5;    // minutos: intervalo inicial de una tarjeta nueva
+const INITIAL_INTERVAL_MIN = 720;    // minutos: intervalo inicial de una tarjeta nueva
 const MIN_INTERVAL_MIN     = 1;    // minutos: suelo mínimo del intervalo
 const SUCCESS_MULTIPLIER   = 2;    // al acertar, el intervalo se multiplica por esto
 const FAILURE_MULTIPLIER   = 0.5;  // al fallar, el intervalo se multiplica por esto
+const REPEAT_MULTIPLIER = 1; // "repetir": intervalo intacto, solo se reinicia el reloj
 
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
@@ -190,6 +191,19 @@ class ReviewSession {
     return card;
   }
 
+ /**
+  * Registra "repetir": el intervalo no cambia, solo se resetea
+  * la fecha de último repaso, así que la tarjeta reaparece
+  * tras el mismo intervalo que ya tenía.
+  */
+ recordRepeat() {
+   const card = this._current;
+   if (!card) return null;
+
+   card.lastReviewed = new Date();
+   return card;
+ }
+
   /** Permite actualizar el pool sin crear una sesión nueva */
   updateCards(cards) {
     this._cards = cards;
@@ -228,6 +242,7 @@ class App {
     this.$cardFrontText  = document.getElementById("card-front-text");
     this.$cardBackText   = document.getElementById("card-back-text");
     this.$ratingArea     = document.getElementById("rating-area");
+    this.$btnRepeat      = document.querySelector('.btn-rating[data-rating="repeat"]');
     this.$reviewEmpty    = document.getElementById("review-empty");
     this.$reviewWaiting  = document.getElementById("review-waiting");
 
@@ -268,21 +283,39 @@ class App {
     this.$cardScene.addEventListener("click", () => {
       if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
     });
+
     document.addEventListener("keydown", (e) => {
-      if (e.code === "Space" || e.code === "Enter") {
-        // Solo en la vista de review y si no hay modal abierto
-        if (!this.$views.review.classList.contains("hidden") &&
-            this.$modalOverlay.classList.contains("hidden") &&
-            !this.$cardFlipper.classList.contains("flipped")) {
-          e.preventDefault();
-          this._flipCard();
-        }
+      const inReviewView = !this.$views.review.classList.contains("hidden");
+      const modalClosed = this.$modalOverlay.classList.contains("hidden");
+      if (!inReviewView || !modalClosed) return;
+
+      const flipped = this.$cardFlipper.classList.contains("flipped");
+
+      // Voltear: solo si aún no está resuelta
+      if (!flipped && (e.code === "Space" || e.code === "Enter" || e.code === "ArrowDown")) {
+        e.preventDefault();
+        this._flipCard();
+        return;
+      }
+
+      // Valorar/repetir: solo si ya está volteada
+      if (flipped && !this.$ratingArea.classList.contains("hidden")) {
+        if (e.code === "ArrowLeft")  { e.preventDefault(); this._rateCard(false); }
+        if (e.code === "ArrowRight") { e.preventDefault(); this._rateCard(true); }
+        if (e.code === "ArrowUp")    { e.preventDefault(); this._repeatCard(); }
       }
     });
 
-    // Review: valorar (acierto/fallo)
+      
+    // Review: valorar (acierto/fallo/repetir)
     document.querySelectorAll(".btn-rating").forEach(btn => {
-      btn.addEventListener("click", () => this._rateCard(btn.dataset.rating === "success"));
+      btn.addEventListener("click", () => {
+        if (btn.dataset.rating === "repeat") {
+          this._repeatCard();
+        } else {
+          this._rateCard(btn.dataset.rating === "success");
+        }
+      });
     });
 
     // Review: valorar mediante swipe (móvil) — derecha = acierto, izquierda = fallo
@@ -408,70 +441,91 @@ class App {
     setTimeout(() => this._renderReview(), 150);
   }
 
-  // ─── Gesto de swipe en la tarjeta volteada ────────────────────────────
-  // Derecha = acierto ("right" = correcto), izquierda = fallo.
-  _bindSwipeGesture() {
-    const SWIPE_THRESHOLD = 80; // px de arrastre para confirmar la valoración
-    const TILT_FACTOR     = 20; // divisor para la rotación de la tarjeta arrastrada
+  async _repeatCard() {
+    const card = this._session.recordRepeat();
 
-    let dragging = false;
-    let startX   = 0;
-    let currentX = 0;
+    if (card) {
+      this._repo.update(card).catch(err =>
+        console.error("Error persistiendo repetición:", err)
+      );
+    }
 
-    const getX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
-
-    // Solo se puede valorar por swipe cuando la tarjeta ya está volteada
-    // y los botones de valoración son visibles.
-    const canSwipe = () =>
-      this.$cardFlipper.classList.contains("flipped") &&
-      !this.$ratingArea.classList.contains("hidden");
-
-    const onStart = (e) => {
-      if (!canSwipe()) return;
-      dragging = true;
-      startX = currentX = getX(e);
-      this.$cardFlipper.style.transition = "none";
-    };
-
-    const onMove = (e) => {
-      if (!dragging) return;
-      currentX = getX(e);
-      const dx = currentX - startX;
-      // El translateX/rotate deben ir ANTES de rotateY(180deg) en la cadena:
-      // como la tarjeta ya está volteada, aplicar la traslación "después" del
-      // giro invertiría visualmente el eje X (arrastrar a la derecha movería
-      // la tarjeta hacia la izquierda en pantalla). Poniendo rotateY al final
-      // (aplicado primero, en términos de composición) la traslación queda
-      // en el espacio de pantalla y el movimiento visual coincide con el dedo.
-      this.$cardFlipper.style.transform =
-        `translateX(${dx}px) rotate(${dx / TILT_FACTOR}deg) rotateY(180deg)`;
-      this.$cardScene.classList.toggle("swipe-success", dx >  SWIPE_THRESHOLD * 0.4);
-      this.$cardScene.classList.toggle("swipe-fail",     dx < -SWIPE_THRESHOLD * 0.4);
-    };
-
-    const onEnd = () => {
-      if (!dragging) return;
-      dragging = false;
-      const dx = currentX - startX;
-
-      this.$cardFlipper.style.transition = "";
-      this.$cardFlipper.style.transform  = "";
-      this.$cardScene.classList.remove("swipe-success", "swipe-fail");
-
-      if (Math.abs(dx) > SWIPE_THRESHOLD) {
-        this._rateCard(dx > 0); // derecha = acierto, izquierda = fallo
-      }
-    };
-
-    this.$cardScene.addEventListener("touchstart", onStart, { passive: true });
-    this.$cardScene.addEventListener("touchmove",  onMove,  { passive: true });
-    this.$cardScene.addEventListener("touchend",   onEnd);
-
-    // Soporte también con ratón (útil al probar en escritorio)
-    this.$cardScene.addEventListener("mousedown", onStart);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup",   onEnd);
+    this.$ratingArea.classList.add("hidden");
+    this.$cardScene.classList.add("hidden");
+    setTimeout(() => this._renderReview(), 150);
   }
+
+  // ─── Gesto de swipe en la tarjeta volteada ────────────────────────────
+  // Derecha = acierto ("right" = correcto), izquierda = fallo, arriba = repetir
+_bindSwipeGesture() {
+  const SWIPE_THRESHOLD = 80;
+  const TILT_FACTOR     = 20;
+  const VSWIPE_THRESHOLD = 80; // umbral vertical para "repetir"
+
+  let dragging = false;
+  let startX = 0, startY = 0;
+  let currentX = 0, currentY = 0;
+
+  const getX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
+  const getY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
+
+  const canSwipe = () =>
+    this.$cardFlipper.classList.contains("flipped") &&
+    !this.$ratingArea.classList.contains("hidden");
+
+  const onStart = (e) => {
+    if (!canSwipe()) return;
+    dragging = true;
+    startX = currentX = getX(e);
+    startY = currentY = getY(e);
+    this.$cardFlipper.style.transition = "none";
+  };
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    currentX = getX(e);
+    currentY = getY(e);
+    const dx = currentX - startX;
+    const dy = currentY - startY;
+
+    this.$cardFlipper.style.transform =
+      `translate(${dx}px, ${dy}px) rotate(${dx / TILT_FACTOR}deg) rotateY(180deg)`;
+
+    // Prioridad: si el movimiento vertical hacia arriba es dominante, se marca "repetir"
+    const verticalDominant = -dy > Math.abs(dx);
+
+    this.$cardScene.classList.toggle("swipe-success", !verticalDominant && dx >  SWIPE_THRESHOLD * 0.4);
+    this.$cardScene.classList.toggle("swipe-fail",    !verticalDominant && dx < -SWIPE_THRESHOLD * 0.4);
+    this.$cardScene.classList.toggle("swipe-repeat",   verticalDominant && -dy > VSWIPE_THRESHOLD * 0.4);
+  };
+
+  const onEnd = () => {
+    if (!dragging) return;
+    dragging = false;
+    const dx = currentX - startX;
+    const dy = currentY - startY;
+
+    this.$cardFlipper.style.transition = "";
+    this.$cardFlipper.style.transform  = "";
+    this.$cardScene.classList.remove("swipe-success", "swipe-fail", "swipe-repeat");
+
+    const verticalDominant = -dy > Math.abs(dx);
+
+    if (verticalDominant && -dy > VSWIPE_THRESHOLD) {
+      this._repeatCard();
+    } else if (!verticalDominant && Math.abs(dx) > SWIPE_THRESHOLD) {
+      this._rateCard(dx > 0);
+    }
+  };
+
+  this.$cardScene.addEventListener("touchstart", onStart, { passive: true });
+  this.$cardScene.addEventListener("touchmove",  onMove,  { passive: true });
+  this.$cardScene.addEventListener("touchend",   onEnd);
+
+  this.$cardScene.addEventListener("mousedown", onStart);
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup",   onEnd);
+}
 
   // ═══════════════════════════════════════════════════════════════════════
   //  VIEW: EDIT

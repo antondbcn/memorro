@@ -197,6 +197,11 @@ input { font-family: inherit; }
   box-shadow: 0 0 0 3px rgba(233,69,96,0.4), var(--shadow);
 }
 
+.card-scene.swipe-repeat .card-back {
+  border-color: rgba(240,165,0,0.6); /* usa --warning como referencia */
+  box-shadow: 0 0 0 3px rgba(240,165,0,0.35), var(--shadow);
+}
+
 
 .card-face p {
   font-size: 1.2rem;
@@ -219,7 +224,7 @@ input { font-family: inherit; }
 
 .rating-buttons {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr); /* antes: repeat(2, 1fr) */
   gap: 10px;
   width: 100%;
 }
@@ -242,7 +247,10 @@ input { font-family: inherit; }
 
 .btn-rating[data-rating="success"] { background: #2E7D52; }
 .btn-rating[data-rating="fail"]    { background: #8B1A2A; }
-
+.btn-rating[data-rating="repeat"] {
+  background: var(--surface-alt);
+  font-size: 1.6rem; /* el icono de reciclaje pesa distinto que ✅❌ */
+}
 /* ═══════════════════════════════════════════════════════
    EDIT VIEW
 ═══════════════════════════════════════════════════════ */
