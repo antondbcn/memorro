@@ -669,7 +669,9 @@ _bindSwipeGesture() {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
     }
-      _switchAddTab(tabName) {
+      
+  }
+_switchAddTab(tabName) {
     this.$addTabBtns.forEach(btn =>
       btn.classList.toggle("active", btn.dataset.tab === tabName)
     );
@@ -739,8 +741,6 @@ _bindSwipeGesture() {
       console.error(err);
     }
   }
-  }
-
   // ─── Helpers ──────────────────────────────────────────────────────────
   _showFeedback(el, msg, type) {
     el.textContent = msg;
