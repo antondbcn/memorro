@@ -258,6 +258,15 @@ class App {
     this.$addDouble      = document.getElementById("add-double");
     this.$btnAddSave     = document.getElementById("btn-add-save");
     this.$addFeedback    = document.getElementById("add-feedback");
+    // Add - tabs
+    this.$addTabBtns       = document.querySelectorAll(".add-tab-btn");
+    this.$addPanels        = document.querySelectorAll(".add-panel");
+
+    // Add - batch
+    this.$addBatchText     = document.getElementById("add-batch-text");
+    this.$addBatchDouble   = document.getElementById("add-batch-double");
+    this.$btnAddBatchSave  = document.getElementById("btn-add-batch-save");
+    this.$addBatchFeedback = document.getElementById("add-batch-feedback");
 
     // Modal
     this.$modalOverlay   = document.getElementById("modal-overlay");
@@ -329,6 +338,14 @@ class App {
 
     // Add: guardar
     this.$btnAddSave.addEventListener("click", () => this._addCard());
+
+    // Add: cambio de pestaña
+    this.$addTabBtns.forEach(btn => {
+      btn.addEventListener("click", () => this._switchAddTab(btn.dataset.tab));
+    });
+
+    // Add: guardar lote
+    this.$btnAddBatchSave.addEventListener("click", () => this._addBatch());
 
     // Modal: cerrar
     this.$btnModalClose.addEventListener("click", () => this._closeModal());
@@ -652,6 +669,76 @@ _bindSwipeGesture() {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
     }
+      _switchAddTab(tabName) {
+    this.$addTabBtns.forEach(btn =>
+      btn.classList.toggle("active", btn.dataset.tab === tabName)
+    );
+    this.$addPanels.forEach(panel =>
+      panel.classList.toggle("hidden", panel.dataset.panel !== tabName)
+    );
+  }
+
+  async _addBatch() {
+    const lines = this.$addBatchText.value
+      .split("\n")
+      .map(l => l.trim())
+      .filter(l => l.length > 0);
+
+    const double = this.$addBatchDouble.checked;
+
+    if (lines.length === 0) {
+      this._showFeedback(this.$addBatchFeedback, "Pega al menos una línea con formato término;traducción.", "error");
+      return;
+    }
+
+    const parsed  = [];
+    const invalid = [];
+
+    lines.forEach((line, idx) => {
+      const parts = line.split(";");
+      const front = (parts[0] ?? "").trim();
+      const back  = (parts[1] ?? "").trim();
+
+      if (parts.length < 2 || !front || !back) {
+        invalid.push(idx + 1);
+      } else {
+        parsed.push({ front, back });
+      }
+    });
+
+    if (parsed.length === 0) {
+      this._showFeedback(this.$addBatchFeedback, "Ninguna línea tiene el formato correcto (término;traducción).", "error");
+      return;
+    }
+
+    try {
+      let count = 0;
+      for (const { front, back } of parsed) {
+        const cards = [new Card("", front, back)];
+        if (double) cards.push(new Card("", back, front));
+
+        for (const card of cards) {
+          await this._repo.add(card);
+          this._cards.push(card);
+          count++;
+        }
+      }
+
+      this._session.updateCards(this._cards);
+      this._updateBadges();
+      this.$addBatchText.value = "";
+
+      let msg = `✓ ${count} tarjeta${count === 1 ? "" : "s"} añadida${count === 1 ? "" : "s"}.`;
+      if (invalid.length > 0) {
+        msg += ` Líneas ignoradas: ${invalid.join(", ")}.`;
+      }
+      this._showFeedback(this.$addBatchFeedback, msg, invalid.length > 0 ? "error" : "success");
+
+    } catch (err) {
+      this._showFeedback(this.$addBatchFeedback, "Error al añadir el lote.", "error");
+      console.error(err);
+    }
+  }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────

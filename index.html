@@ -76,34 +76,55 @@
     </div>
   </div>
 
-  <!-- VIEW: Add -->
-  <div id="view-add" class="view hidden">
-    <header class="top-bar">
-      <span class="app-title">Nueva tarjeta</span>
-    </header>
+<!-- VIEW: Add -->
+<div id="view-add" class="view hidden">
+  <header class="top-bar">
+    <span class="app-title">Nueva tarjeta</span>
+  </header>
 
-    <form id="add-form" class="card-form" onsubmit="return false;">
-      <label class="form-label" for="add-front">Frente</label>
-      <textarea id="add-front" class="form-textarea" placeholder="Escribe el frente…" rows="4"></textarea>
-
-      <label class="form-label" for="add-back">Dorso</label>
-      <textarea id="add-back" class="form-textarea" placeholder="Escribe el dorso…" rows="4"></textarea>
-
-      <label class="toggle-label">
-        <div class="toggle-wrap">
-          <input id="add-double" type="checkbox" checked />
-          <span class="toggle-track">
-            <span class="toggle-thumb"></span>
-          </span>
-        </div>
-        <span>Doble (genera frente→dorso y dorso→frente)</span>
-      </label>
-
-      <button id="btn-add-save" class="btn-primary">Añadir tarjeta</button>
-      <p id="add-feedback" class="form-feedback hidden"></p>
-    </form>
+  <div class="add-tabs">
+    <button class="add-tab-btn active" data-tab="individual">Individual</button>
+    <button class="add-tab-btn" data-tab="batch">Por lotes</button>
   </div>
 
+  <!-- Panel: Individual -->
+  <form id="add-form" class="card-form add-panel" data-panel="individual" onsubmit="return false;">
+    <label class="form-label" for="add-front">Frente</label>
+    <textarea id="add-front" class="form-textarea" placeholder="Escribe el frente…" rows="4"></textarea>
+
+    <label class="form-label" for="add-back">Dorso</label>
+    <textarea id="add-back" class="form-textarea" placeholder="Escribe el dorso…" rows="4"></textarea>
+
+    <label class="toggle-label">
+      <div class="toggle-wrap">
+        <input id="add-double" type="checkbox" checked />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </div>
+      <span>Doble (genera frente→dorso y dorso→frente)</span>
+    </label>
+
+    <button id="btn-add-save" class="btn-primary">Añadir tarjeta</button>
+    <p id="add-feedback" class="form-feedback hidden"></p>
+  </form>
+
+  <!-- Panel: Por lotes -->
+  <form id="add-batch-form" class="card-form add-panel hidden" data-panel="batch" onsubmit="return false;">
+    <label class="form-label" for="add-batch-text">Una línea por tarjeta: <code>término;traducción</code></label>
+    <textarea id="add-batch-text" class="form-textarea" placeholder="perro;Hund&#10;gato;Katze&#10;casa;Haus" rows="10"></textarea>
+
+    <label class="toggle-label">
+      <div class="toggle-wrap">
+        <input id="add-batch-double" type="checkbox" checked />
+        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+      </div>
+      <span>Doble (genera también dorso→frente por línea)</span>
+    </label>
+
+    <button id="btn-add-batch-save" class="btn-primary">Añadir lote</button>
+    <p id="add-batch-feedback" class="form-feedback hidden"></p>
+  </form>
+</div>
+    
   <!-- ══════════════════════════════════ MODAL: Edit Card ══════════════════════════════════ -->
   <div id="modal-overlay" class="modal-overlay hidden">
     <div class="modal">
