@@ -471,6 +471,83 @@ input { font-family: inherit; }
   color: var(--text);
 }
 
+.histogram-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px 8px;
+}
+
+.histogram-label {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.histogram-select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.histogram-select:focus {
+  border-color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   HISTOGRAM VIEW
+═══════════════════════════════════════════════════════════════════════════════════════ */
+.histogram-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px 20px 28px;
+}
+
+.histogram-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.histogram-bar-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.histogram-bar-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.histogram-bar-shell {
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+
+.histogram-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #e94560, #f07f6b);
+  transition: width var(--transition);
+}
+
+.histogram-bar-value {
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 /* ═══════════════════════════════════════════════════════
    MODAL
 ═══════════════════════════════════════════════════════ */

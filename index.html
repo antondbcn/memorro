@@ -124,6 +124,33 @@
     <p id="add-batch-feedback" class="form-feedback hidden"></p>
   </form>
 </div>
+
+  <!-- VIEW: Histogram -->
+  <div id="view-histograma" class="view hidden">
+    <header class="top-bar">
+      <span class="app-title">Histograma</span>
+      <span id="histogram-count" class="badge"></span>
+    </header>
+
+    <div class="histogram-controls">
+      <label class="histogram-label" for="histogram-horizon">Horizonte:</label>
+      <select id="histogram-horizon" class="histogram-select">
+        <option value="180">3 h</option>
+        <option value="360">6 h</option>
+        <option value="720">12 h</option>
+        <option value="1440">24 h</option>
+        <option value="2880">48 h</option>
+      </select>
+    </div>
+
+    <main class="histogram-area">
+      <div id="histogram-empty" class="empty-state hidden">
+        <div class="empty-icon">📊</div>
+        <p>No hay tarjetas con repaso próximo en este horizonte.</p>
+      </div>
+      <div id="histogram-chart" class="histogram-chart"></div>
+    </main>
+  </div>
     
   <!-- ══════════════════════════════════ MODAL: Edit Card ══════════════════════════════════ -->
   <div id="modal-overlay" class="modal-overlay hidden">
@@ -167,6 +194,12 @@
         <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
       </svg>
       <span>Añadir</span>
+    </button>
+    <button class="nav-btn" data-view="histograma">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 19h16"/><path d="M7 15v4"/><path d="M11 11v8"/><path d="M15 7v12"/><path d="M19 3v16"/>
+      </svg>
+      <span>Histograma</span>
     </button>
   </nav>
 

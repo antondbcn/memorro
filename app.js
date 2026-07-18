@@ -230,13 +230,14 @@ class App {
   _bindDOM() {
     // Views
     this.$views = {
-      review : document.getElementById("view-review"),
-      edit   : document.getElementById("view-edit"),
-      add    : document.getElementById("view-add"),
+      review     : document.getElementById("view-review"),
+      edit       : document.getElementById("view-edit"),
+      add        : document.getElementById("view-add"),
+      histograma : document.getElementById("view-histograma"),
     };
 
     // Review
-    this.$reviewCount    = document.getElementById("review-count");
+    this.$reviewCount      = document.getElementById("review-count");
     this.$cardScene      = document.getElementById("card-scene");
     this.$cardFlipper    = document.getElementById("card-flipper");
     this.$cardFrontText  = document.getElementById("card-front-text");
@@ -252,8 +253,14 @@ class App {
     this.$cardList       = document.getElementById("card-list");
     this.$editEmpty      = document.getElementById("edit-empty");
 
+    // Histogram
+    this.$histogramCount    = document.getElementById("histogram-count");
+    this.$histogramChart    = document.getElementById("histogram-chart");
+    this.$histogramEmpty    = document.getElementById("histogram-empty");
+    this.$histogramHorizon  = document.getElementById("histogram-horizon");
+
     // Add
-    this.$addFront       = document.getElementById("add-front");
+    this.$addFront          = document.getElementById("add-front");
     this.$addBack        = document.getElementById("add-back");
     this.$addDouble      = document.getElementById("add-double");
     this.$btnAddSave     = document.getElementById("btn-add-save");
@@ -347,6 +354,9 @@ class App {
     // Add: guardar lote
     this.$btnAddBatchSave.addEventListener("click", () => this._addBatch());
 
+    // Histogram: cambiar horizonte
+    this.$histogramHorizon.addEventListener("change", () => this._renderHistogram());
+
     // Modal: cerrar
     this.$btnModalClose.addEventListener("click", () => this._closeModal());
     this.$modalOverlay.addEventListener("click", (e) => {
@@ -392,14 +402,19 @@ class App {
     if (viewName === "review") {
       this._renderReview();
     }
+
+    if (viewName === "histograma") {
+      this._renderHistogram();
+    }
   }
 
   // ─── Badges de contador ───────────────────────────────────────────────
   _updateBadges() {
     const n = this._cards.length;
     const label = n === 1 ? "1 tarjeta" : `${n} tarjetas`;
-    this.$reviewCount.textContent = label;
-    this.$editCount.textContent   = label;
+    this.$reviewCount.textContent    = label;
+    this.$editCount.textContent      = label;
+    this.$histogramCount.textContent = label;
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -439,6 +454,65 @@ class App {
     this.$cardFlipper.classList.add("flipped");
     // Mostrar valoración tras la animación
     setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
+  }
+
+  _renderHistogram() {
+    const cards = this._cards;
+    if (cards.length === 0) {
+      this.$histogramEmpty.classList.remove("hidden");
+      this.$histogramChart.innerHTML = "";
+      return;
+    }
+
+    const horizonMinutes = Number(this.$histogramHorizon.value || 180);
+    const bucketCount = 12;
+    const bucketSize = Math.max(15, Math.round(horizonMinutes / bucketCount));
+    const now = Date.now();
+    const bucketLabels = [];
+    const bucketCounts = Array(bucketCount).fill(0);
+
+    for (let i = 0; i < bucketCount; i += 1) {
+      const start = i * bucketSize;
+      const end = (i + 1) * bucketSize;
+      const startLabel = start === 0 ? "Ahora" : `${start}m`;
+      const endLabel = end >= 60 ? `${Math.round(end / 60)}h` : `${end}m`;
+      bucketLabels.push(`${startLabel}–${endLabel}`);
+    }
+
+    const horizonMs = horizonMinutes * 60 * 1000;
+    cards.forEach(card => {
+      const dueAt = card.dueAt ? card.dueAt.getTime() : card.createdAt.getTime();
+      const delta = dueAt - now;
+      if (delta < 0) {
+        bucketCounts[0] += 1;
+      } else if (delta < horizonMs) {
+        const bucketIndex = Math.min(bucketCount - 1, Math.floor(delta / (bucketSize * 60 * 1000)));
+        bucketCounts[bucketIndex] += 1;
+      }
+    });
+
+    const hasAny = bucketCounts.some(c => c > 0);
+    if (!hasAny) {
+      this.$histogramEmpty.classList.remove("hidden");
+      this.$histogramChart.innerHTML = "";
+      return;
+    }
+
+    this.$histogramEmpty.classList.add("hidden");
+    const maxCount = Math.max(...bucketCounts, 1);
+
+    this.$histogramChart.innerHTML = bucketCounts.map((count, index) => {
+      const pct = Math.round((count / maxCount) * 100);
+      return `
+        <div class="histogram-bar-row">
+          <span class="histogram-bar-label">${this._esc(bucketLabels[index])}</span>
+          <div class="histogram-bar-shell">
+            <div class="histogram-bar-fill" style="width: ${pct}%;"></div>
+          </div>
+          <span class="histogram-bar-value">${count}</span>
+        </div>
+      `;
+    }).join("");
   }
 
   /** @param {boolean} success – true si acierto, false si fallo */
@@ -668,9 +742,9 @@ _bindSwipeGesture() {
     } catch (err) {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
-    }
-      
+    }   
   }
+    
 _switchAddTab(tabName) {
     this.$addTabBtns.forEach(btn =>
       btn.classList.toggle("active", btn.dataset.tab === tabName)
