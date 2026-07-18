@@ -157,20 +157,47 @@ class ReviewSession {
     if (!this.hasCards) return null;
 
     const now = new Date();
-    const due = this._cards
-      .map(card => ({ card, overdueMin: Math.floor((now - card.dueAt) / 60000) }))
-      .filter(x => x.overdueMin >= 0);
 
-    if (due.length === 0) {
-      this._current = null;
-      return null;
+    // Seleccionar solo tarjetas en curso ya revisadas y cuyo momento de repaso ya ha llegado.
+    const dueCards = this._cards
+      .filter(card => card.lastReviewed)
+      .map(card => ({
+        card,
+        overdueMin: (now - card.dueAt) / 60000,
+      }))
+      .filter(entry => entry.overdueMin >= 0);
+
+    if (dueCards.length > 0) {
+      // Prioridad a las tarjetas dentro del margen de +/- 10% de H alrededor de ahora,
+      // pero únicamente las ya vencidas (overdue >= 0).
+      const marginCards = dueCards.filter(entry =>
+        entry.overdueMin <= Math.max(1, entry.card.interval * 0.1)
+      );
+
+      if (marginCards.length > 0) {
+        // Ordenar por urgencia: las más próximas a sobrepasar el límite son las más atrasadas
+        // dentro del margen.
+        marginCards.sort((a, b) => b.overdueMin - a.overdueMin);
+        const maxOverdue = marginCards[0].overdueMin;
+        const tied = marginCards.filter(entry => Math.abs(entry.overdueMin - maxOverdue) < 1e-6);
+        this._current = tied[Math.floor(Math.random() * tied.length)].card;
+        return this._current;
+      }
+
+      // Si no hay tarjetas dentro del margen, elegir al azar entre las tarjetas vencidas.
+      this._current = dueCards[Math.floor(Math.random() * dueCards.length)].card;
+      return this._current;
     }
 
-    const maxOverdue = Math.max(...due.map(x => x.overdueMin));
-    const tied        = due.filter(x => x.overdueMin === maxOverdue);
+    // Si no hay tarjetas en curso vencidas, mostrar una nueva tarjeta.
+    const newCard = this._cards.find(card => !card.lastReviewed);
+    if (newCard) {
+      this._current = newCard;
+      return this._current;
+    }
 
-    this._current = tied[Math.floor(Math.random() * tied.length)].card;
-    return this._current;
+    this._current = null;
+    return null;
   }
 
   /**
@@ -183,23 +210,30 @@ class ReviewSession {
     const card = this._current;
     if (!card) return null;
 
-    card.interval = success
-      ? card.interval * SUCCESS_MULTIPLIER
-      : Math.max(MIN_INTERVAL_MIN, card.interval * FAILURE_MULTIPLIER);
-    card.lastReviewed = new Date();
+    const isNew = !card.lastReviewed;
+    if (isNew) {
+      card.interval = success ? 1440 : 3;
+    } else {
+      card.interval = success
+        ? card.interval * SUCCESS_MULTIPLIER
+        : Math.max(MIN_INTERVAL_MIN, card.interval * FAILURE_MULTIPLIER);
+    }
 
+    card.lastReviewed = new Date();
     return card;
   }
 
  /**
-  * Registra "repetir": el intervalo no cambia, solo se resetea
-  * la fecha de último repaso, así que la tarjeta reaparece
-  * tras el mismo intervalo que ya tenía.
+  * Registra "repetir": si es nueva tarjeta, se inicia a 1 hora.
+  * Si no es nueva, se conserva el intervalo actual.
   */
  recordRepeat() {
    const card = this._current;
    if (!card) return null;
 
+   if (!card.lastReviewed) {
+     card.interval = 60;
+   }
    card.lastReviewed = new Date();
    return card;
  }
@@ -483,9 +517,7 @@ class App {
     cards.forEach(card => {
       const dueAt = card.dueAt ? card.dueAt.getTime() : card.createdAt.getTime();
       const delta = dueAt - now;
-      if (delta < 0) {
-        bucketCounts[0] += 1;
-      } else if (delta < horizonMs) {
+      if (delta >= 0 && delta < horizonMs) {
         const bucketIndex = Math.min(bucketCount - 1, Math.floor(delta / (bucketSize * 60 * 1000)));
         bucketCounts[bucketIndex] += 1;
       }
