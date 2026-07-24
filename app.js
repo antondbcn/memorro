@@ -6,6 +6,8 @@ import { initializeApp }              from "https://www.gstatic.com/firebasejs/1
 import { getFirestore, collection, getDocs,
          addDoc, updateDoc, deleteDoc,
          doc, serverTimestamp, Timestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged }
+  from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CONSTANTES DEL ALGORITMO DE REPASO
@@ -870,7 +872,14 @@ _switchAddTab(tabName) {
 // ═══════════════════════════════════════════════════════════════════════════
 const firebaseApp = initializeApp(firebaseConfig);
 const db          = getFirestore(firebaseApp);
+const auth        = getAuth(firebaseApp);
 const repository  = new CardRepository(db);
 const app         = new App(repository);
 
-app.init();
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    app.init(); // ya autenticado, arrancamos la app
+  }
+});
+
+signInAnonymously(auth).catch(err => console.error("Error de autenticación:", err));
