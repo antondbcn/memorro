@@ -1,6 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  FIREBASE CONFIG
-//  Sustituye estos valores por los de tu proyecto en Firebase Console.
 // ═══════════════════════════════════════════════════════════════════════════
 import { initializeApp }              from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getFirestore, collection, getDocs,
@@ -9,16 +8,12 @@ import { getFirestore, collection, getDocs,
 import { getAuth, signInAnonymously, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  CONSTANTES DEL ALGORITMO DE REPASO
-//  Modelo de curva de olvido por tarjeta: cada tarjeta tiene un intervalo H
-//  (en minutos) que se dobla al acertar y se reduce a la mitad al fallar.
-// ═══════════════════════════════════════════════════════════════════════════
-const INITIAL_INTERVAL_MIN = 720;    // minutos: intervalo inicial de una tarjeta nueva
-const MIN_INTERVAL_MIN     = 1;    // minutos: suelo mínimo del intervalo
-const SUCCESS_MULTIPLIER   = 2;    // al acertar, el intervalo se multiplica por esto
-const FAILURE_MULTIPLIER   = 0.5;  // al fallar, el intervalo se multiplica por esto
-const REPEAT_MULTIPLIER = 1; // "repetir": intervalo intacto, solo se reinicia el reloj
+const INITIAL_INTERVAL_MIN = 720;
+const MIN_INTERVAL_MIN     = 1;
+const SUCCESS_MULTIPLIER   = 2;
+const FAILURE_MULTIPLIER   = 0.5;
+const DEFAULT_DECK_NAME    = "General";
+const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
 
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
@@ -31,58 +26,56 @@ const firebaseConfig = {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: Card
-//  Modelo de datos de una tarjeta. No tiene lógica de UI.
 // ═══════════════════════════════════════════════════════════════════════════
 class Card {
   /**
-   * @param {string}    id        – ID del documento en Firestore (vacío si es nueva)
-   * @param {string}    front     – Texto del frente
-   * @param {string}    back      – Texto del dorso
-   * @param {number}    interval  – Intervalo H en minutos hasta el próximo repaso ideal
-   * @param {Date|null} lastReviewed – Fecha del último repaso (null si nunca se ha repasado)
+   * @param {string}    id
+   * @param {string}    front
+   * @param {string}    back
+   * @param {string}    deck          – nombre de la baraja a la que pertenece
+   * @param {number}    interval
+   * @param {Date|null} lastReviewed
    * @param {Date|null} createdAt
    */
-  constructor(id, front, back, interval = INITIAL_INTERVAL_MIN, lastReviewed = null, createdAt = null) {
+  constructor(id, front, back, deck, interval = INITIAL_INTERVAL_MIN, lastReviewed = null, createdAt = null) {
     this.id           = id;
     this.front        = front.trim();
     this.back         = back.trim();
+    this.deck         = deck;
     this.interval     = Math.max(MIN_INTERVAL_MIN, interval);
-    this.lastReviewed = lastReviewed;      // Date | null
+    this.lastReviewed = lastReviewed;
     this.createdAt    = createdAt ?? new Date();
   }
 
-  /** Momento en que la tarjeta "vence" (toca repasarla).
-   *  Si nunca se ha repasado, está vencida desde su creación. */
   get dueAt() {
     if (!this.lastReviewed) return this.createdAt;
     return new Date(this.lastReviewed.getTime() + this.interval * 60000);
   }
 
-  /** Datos planos para guardar en Firestore (sin el id) */
   toFirestore() {
     return {
       front:        this.front,
       back:         this.back,
+      deck:         this.deck,
       interval:     this.interval,
       lastReviewed: this.lastReviewed ? Timestamp.fromDate(this.lastReviewed) : null,
       createdAt:    serverTimestamp(),
     };
   }
 
-  /** Construye un Card desde un DocumentSnapshot de Firestore */
   static fromFirestore(snapshot) {
     const d = snapshot.data();
     return new Card(
       snapshot.id,
-      d.front    ?? "",
-      d.back     ?? "",
+      d.front ?? "",
+      d.back  ?? "",
+      d.deck  ?? DEFAULT_DECK_NAME,
       d.interval ?? INITIAL_INTERVAL_MIN,
       d.lastReviewed ? d.lastReviewed.toDate() : null,
       d.createdAt?.toDate() ?? null,
     );
   }
 
-  /** Devuelve true si el texto de filtro aparece en frente o dorso */
   matches(filter) {
     const q = filter.toLowerCase();
     return this.front.toLowerCase().includes(q)
@@ -92,43 +85,35 @@ class Card {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: CardRepository
-//  Toda la interacción con Firestore pasa por aquí.
 // ═══════════════════════════════════════════════════════════════════════════
 class CardRepository {
-  /**
-   * @param {import("firebase/firestore").Firestore} db
-   * @param {string} collectionName
-   */
   constructor(db, collectionName = "cards") {
     this._db  = db;
     this._col = collection(db, collectionName);
   }
 
-  /** Carga todas las tarjetas de Firestore → Array<Card> */
   async fetchAll() {
     const snap = await getDocs(this._col);
     return snap.docs.map(Card.fromFirestore);
   }
 
-  /** Guarda una nueva tarjeta. Devuelve la Card con el id asignado. */
   async add(card) {
     const ref = await addDoc(this._col, card.toFirestore());
     card.id = ref.id;
     return card;
   }
 
-  /** Actualiza frente, dorso, intervalo y fecha de último repaso de una tarjeta existente. */
   async update(card) {
     const ref = doc(this._db, this._col.path, card.id);
     await updateDoc(ref, {
       front:        card.front,
       back:         card.back,
+      deck:         card.deck,
       interval:     card.interval,
       lastReviewed: card.lastReviewed ? Timestamp.fromDate(card.lastReviewed) : null,
     });
   }
 
-  /** Elimina una tarjeta por su id. */
   async remove(cardId) {
     const ref = doc(this._db, this._col.path, cardId);
     await deleteDoc(ref);
@@ -136,11 +121,35 @@ class CardRepository {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  CLASS: ReviewSession
-//  Controla el flujo de repaso: selección por tarjeta más vencida según H.
+//  CLASS: DeckRepository
+// ═══════════════════════════════════════════════════════════════════════════
+class DeckRepository {
+  constructor(db, collectionName = "decks") {
+    this._db  = db;
+    this._col = collection(db, collectionName);
+  }
+
+  async fetchAll() {
+    const snap = await getDocs(this._col);
+    return snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+  }
+
+  async add(name) {
+    const ref = await addDoc(this._col, { name, createdAt: serverTimestamp() });
+    return { id: ref.id, name };
+  }
+
+  async remove(deckId) {
+    const ref = doc(this._db, this._col.path, deckId);
+    await deleteDoc(ref);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: ReviewSession  (sin cambios de lógica, solo opera sobre el subconjunto
+//  de tarjetas que le pase la App)
 // ═══════════════════════════════════════════════════════════════════════════
 class ReviewSession {
-  /** @param {Card[]} cards */
   constructor(cards) {
     this._cards   = [...cards];
     this._current = null;
@@ -148,37 +157,21 @@ class ReviewSession {
 
   get hasCards() { return this._cards.length > 0; }
 
-  /**
-   * Elige la tarjeta más vencida (mayor tiempo transcurrido desde que tocaba
-   * repasarla). Si varias tarjetas están vencidas por igual (mismo número de
-   * minutos completos de retraso — típico al importar varias tarjetas nuevas
-   * a la vez), se elige al azar entre ellas. Devuelve null si ninguna tarjeta
-   * está vencida todavía.
-   */
   pick() {
     if (!this.hasCards) return null;
-
     const now = new Date();
 
-    // Seleccionar solo tarjetas en curso ya revisadas y cuyo momento de repaso ya ha llegado.
     const dueCards = this._cards
       .filter(card => card.lastReviewed)
-      .map(card => ({
-        card,
-        overdueMin: (now - card.dueAt) / 60000,
-      }))
+      .map(card => ({ card, overdueMin: (now - card.dueAt) / 60000 }))
       .filter(entry => entry.overdueMin >= 0);
 
     if (dueCards.length > 0) {
-      // Prioridad a las tarjetas dentro del margen de +/- 10% de H alrededor de ahora,
-      // pero únicamente las ya vencidas (overdue >= 0).
       const marginCards = dueCards.filter(entry =>
         entry.overdueMin <= Math.max(1, entry.card.interval * 0.1)
       );
 
       if (marginCards.length > 0) {
-        // Ordenar por urgencia: las más próximas a sobrepasar el límite son las más atrasadas
-        // dentro del margen.
         marginCards.sort((a, b) => b.overdueMin - a.overdueMin);
         const maxOverdue = marginCards[0].overdueMin;
         const tied = marginCards.filter(entry => Math.abs(entry.overdueMin - maxOverdue) < 1e-6);
@@ -186,28 +179,15 @@ class ReviewSession {
         return this._current;
       }
 
-      // Si no hay tarjetas dentro del margen, elegir al azar entre las tarjetas vencidas.
       this._current = dueCards[Math.floor(Math.random() * dueCards.length)].card;
       return this._current;
     }
 
-    // Si no hay tarjetas en curso vencidas, mostrar una nueva tarjeta.
     const newCard = this._cards.find(card => !card.lastReviewed);
-    if (newCard) {
-      this._current = newCard;
-      return this._current;
-    }
-
-    this._current = null;
-    return null;
+    this._current = newCard ?? null;
+    return this._current;
   }
 
-  /**
-   * Registra el resultado del repaso: ajusta el intervalo (×2 si acierto,
-   * ÷2 si fallo, con suelo mínimo) y resetea la fecha de último repaso.
-   * @param {boolean} success
-   * @returns {Card|null} la tarjeta actualizada
-   */
   recordRating(success) {
     const card = this._current;
     if (!card) return null;
@@ -220,27 +200,18 @@ class ReviewSession {
         ? card.interval * SUCCESS_MULTIPLIER
         : Math.max(MIN_INTERVAL_MIN, card.interval * FAILURE_MULTIPLIER);
     }
-
     card.lastReviewed = new Date();
     return card;
   }
 
- /**
-  * Registra "repetir": si es nueva tarjeta, se inicia a 1 hora.
-  * Si no es nueva, se conserva el intervalo actual.
-  */
- recordRepeat() {
-   const card = this._current;
-   if (!card) return null;
+  recordRepeat() {
+    const card = this._current;
+    if (!card) return null;
+    if (!card.lastReviewed) card.interval = 60;
+    card.lastReviewed = new Date();
+    return card;
+  }
 
-   if (!card.lastReviewed) {
-     card.interval = 60;
-   }
-   card.lastReviewed = new Date();
-   return card;
- }
-
-  /** Permite actualizar el pool sin crear una sesión nueva */
   updateCards(cards) {
     this._cards = cards;
   }
@@ -248,14 +219,18 @@ class ReviewSession {
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: App
-//  Controlador principal: coordina vistas, repositorio y sesión.
 // ═══════════════════════════════════════════════════════════════════════════
 class App {
-  constructor(repository) {
-    this._repo    = repository;
-    this._cards   = [];          // caché local
+  constructor(cardRepo, deckRepo) {
+    this._cardRepo = cardRepo;
+    this._deckRepo = deckRepo;
+
+    this._cards   = [];          // TODAS las tarjetas, de todas las barajas
+    this._decks   = [];          // [{id, name}]
+    this._currentDeck = null;    // nombre de la baraja activa
+
     this._session = new ReviewSession([]);
-    this._editingCard = null;    // tarjeta abierta en el modal
+    this._editingCard = null;
     this._filterDebounceTimer = null;
 
     this._bindDOM();
@@ -264,7 +239,6 @@ class App {
 
   // ─── Cachés de elementos DOM ──────────────────────────────────────────
   _bindDOM() {
-    // Views
     this.$views = {
       review     : document.getElementById("view-review"),
       edit       : document.getElementById("view-edit"),
@@ -272,38 +246,50 @@ class App {
       histograma : document.getElementById("view-histograma"),
     };
 
+    // Deck bar
+    this.$deckBarBtn   = document.getElementById("deck-bar-btn");
+    this.$deckBarName  = document.getElementById("deck-bar-name");
+
+    // Deck modal
+    this.$deckModalOverlay = document.getElementById("deck-modal-overlay");
+    this.$btnDeckModalClose = document.getElementById("btn-deck-modal-close");
+    this.$deckList      = document.getElementById("deck-list");
+    this.$deckNewName   = document.getElementById("deck-new-name");
+    this.$btnDeckAdd     = document.getElementById("btn-deck-add");
+    this.$deckFeedback  = document.getElementById("deck-feedback");
+
     // Review
-    this.$reviewCount      = document.getElementById("review-count");
-    this.$cardScene      = document.getElementById("card-scene");
-    this.$cardFlipper    = document.getElementById("card-flipper");
-    this.$cardFrontText  = document.getElementById("card-front-text");
-    this.$cardBackText   = document.getElementById("card-back-text");
-    this.$ratingArea     = document.getElementById("rating-area");
-    this.$btnRepeat      = document.querySelector('.btn-rating[data-rating="repeat"]');
-    this.$reviewEmpty    = document.getElementById("review-empty");
-    this.$reviewWaiting  = document.getElementById("review-waiting");
+    this.$reviewCount   = document.getElementById("review-count");
+    this.$cardScene     = document.getElementById("card-scene");
+    this.$cardFlipper   = document.getElementById("card-flipper");
+    this.$cardFrontText = document.getElementById("card-front-text");
+    this.$cardBackText  = document.getElementById("card-back-text");
+    this.$ratingArea    = document.getElementById("rating-area");
+    this.$reviewEmpty   = document.getElementById("review-empty");
+    this.$reviewWaiting = document.getElementById("review-waiting");
 
     // Edit
-    this.$editCount      = document.getElementById("edit-count");
-    this.$searchInput    = document.getElementById("search-input");
-    this.$cardList       = document.getElementById("card-list");
-    this.$editEmpty      = document.getElementById("edit-empty");
+    this.$editCount   = document.getElementById("edit-count");
+    this.$searchInput = document.getElementById("search-input");
+    this.$cardList    = document.getElementById("card-list");
+    this.$editEmpty   = document.getElementById("edit-empty");
 
     // Histogram
-    this.$histogramCount    = document.getElementById("histogram-count");
-    this.$histogramChart    = document.getElementById("histogram-chart");
-    this.$histogramEmpty    = document.getElementById("histogram-empty");
-    this.$histogramHorizon  = document.getElementById("histogram-horizon");
+    this.$histogramCount   = document.getElementById("histogram-count");
+    this.$histogramChart   = document.getElementById("histogram-chart");
+    this.$histogramEmpty   = document.getElementById("histogram-empty");
+    this.$histogramHorizon = document.getElementById("histogram-horizon");
 
-    // Add
-    this.$addFront          = document.getElementById("add-front");
-    this.$addBack        = document.getElementById("add-back");
-    this.$addDouble      = document.getElementById("add-double");
-    this.$btnAddSave     = document.getElementById("btn-add-save");
-    this.$addFeedback    = document.getElementById("add-feedback");
+    // Add - individual
+    this.$addFront      = document.getElementById("add-front");
+    this.$addBack       = document.getElementById("add-back");
+    this.$addDouble     = document.getElementById("add-double");
+    this.$btnAddSave    = document.getElementById("btn-add-save");
+    this.$addFeedback   = document.getElementById("add-feedback");
+
     // Add - tabs
-    this.$addTabBtns       = document.querySelectorAll(".add-tab-btn");
-    this.$addPanels        = document.querySelectorAll(".add-panel");
+    this.$addTabBtns = document.querySelectorAll(".add-tab-btn");
+    this.$addPanels  = document.querySelectorAll(".add-panel");
 
     // Add - batch
     this.$addBatchText     = document.getElementById("add-batch-text");
@@ -311,7 +297,7 @@ class App {
     this.$btnAddBatchSave  = document.getElementById("btn-add-batch-save");
     this.$addBatchFeedback = document.getElementById("add-batch-feedback");
 
-    // Modal
+    // Modal (edición de tarjeta)
     this.$modalOverlay   = document.getElementById("modal-overlay");
     this.$editFront      = document.getElementById("edit-front");
     this.$editBack       = document.getElementById("edit-back");
@@ -326,31 +312,40 @@ class App {
 
   // ─── Event listeners ──────────────────────────────────────────────────
   _bindEvents() {
-    // Navegación
     this.$navBtns.forEach(btn => {
       btn.addEventListener("click", () => this._navigateTo(btn.dataset.view));
     });
 
-    // Review: voltear con clic en tarjeta o teclado
+    // Deck bar / modal
+    this.$deckBarBtn.addEventListener("click", () => this._openDeckModal());
+    this.$btnDeckModalClose.addEventListener("click", () => this._closeDeckModal());
+    this.$deckModalOverlay.addEventListener("click", (e) => {
+      if (e.target === this.$deckModalOverlay) this._closeDeckModal();
+    });
+    this.$btnDeckAdd.addEventListener("click", () => this._createDeck());
+    this.$deckNewName.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this._createDeck();
+    });
+
+    // Review: voltear
     this.$cardScene.addEventListener("click", () => {
       if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
     });
 
     document.addEventListener("keydown", (e) => {
       const inReviewView = !this.$views.review.classList.contains("hidden");
-      const modalClosed = this.$modalOverlay.classList.contains("hidden");
-      if (!inReviewView || !modalClosed) return;
+      const modalsClosed = this.$modalOverlay.classList.contains("hidden")
+                         && this.$deckModalOverlay.classList.contains("hidden");
+      if (!inReviewView || !modalsClosed) return;
 
       const flipped = this.$cardFlipper.classList.contains("flipped");
 
-      // Voltear: solo si aún no está resuelta
       if (!flipped && (e.code === "Space" || e.code === "Enter" || e.code === "ArrowDown")) {
         e.preventDefault();
         this._flipCard();
         return;
       }
 
-      // Valorar/repetir: solo si ya está volteada
       if (flipped && !this.$ratingArea.classList.contains("hidden")) {
         if (e.code === "ArrowLeft")  { e.preventDefault(); this._rateCard(false); }
         if (e.code === "ArrowRight") { e.preventDefault(); this._rateCard(true); }
@@ -358,48 +353,35 @@ class App {
       }
     });
 
-      
-    // Review: valorar (acierto/fallo/repetir)
     document.querySelectorAll(".btn-rating").forEach(btn => {
       btn.addEventListener("click", () => {
-        if (btn.dataset.rating === "repeat") {
-          this._repeatCard();
-        } else {
-          this._rateCard(btn.dataset.rating === "success");
-        }
+        if (btn.dataset.rating === "repeat") this._repeatCard();
+        else this._rateCard(btn.dataset.rating === "success");
       });
     });
 
-    // Review: valorar mediante swipe (móvil) — derecha = acierto, izquierda = fallo
     this._bindSwipeGesture();
 
-    // Edit: filtro con debounce
     this.$searchInput.addEventListener("input", () => {
       clearTimeout(this._filterDebounceTimer);
       this._filterDebounceTimer = setTimeout(() => this._renderCardList(), 800);
     });
 
-    // Add: guardar
     this.$btnAddSave.addEventListener("click", () => this._addCard());
 
-    // Add: cambio de pestaña
     this.$addTabBtns.forEach(btn => {
       btn.addEventListener("click", () => this._switchAddTab(btn.dataset.tab));
     });
 
-    // Add: guardar lote
     this.$btnAddBatchSave.addEventListener("click", () => this._addBatch());
 
-    // Histogram: cambiar horizonte
     this.$histogramHorizon.addEventListener("change", () => this._renderHistogram());
 
-    // Modal: cerrar
     this.$btnModalClose.addEventListener("click", () => this._closeModal());
     this.$modalOverlay.addEventListener("click", (e) => {
       if (e.target === this.$modalOverlay) this._closeModal();
     });
 
-    // Modal: guardar y eliminar
     this.$btnModalSave.addEventListener("click",   () => this._saveEdit());
     this.$btnModalDelete.addEventListener("click", () => this._deleteCard());
   }
@@ -407,46 +389,55 @@ class App {
   // ─── Inicialización ───────────────────────────────────────────────────
   async init() {
     try {
-      this._cards = await this._repo.fetchAll();
-      this._session.updateCards(this._cards);
+      this._decks = await this._deckRepo.fetchAll();
+
+      if (this._decks.length === 0) {
+        const deck = await this._deckRepo.add(DEFAULT_DECK_NAME);
+        this._decks.push(deck);
+      }
+
+      const storedDeck = localStorage.getItem(LS_CURRENT_DECK_KEY);
+      this._currentDeck = this._decks.some(d => d.name === storedDeck)
+        ? storedDeck
+        : this._decks[0].name;
+      localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
+
+      this._cards = await this._cardRepo.fetchAll();
+
+      this._refreshDeckBar();
+      this._session.updateCards(this._cardsInCurrentDeck());
       this._updateBadges();
       this._renderReview();
     } catch (err) {
-      console.error("Error cargando tarjetas:", err);
+      console.error("Error cargando la app:", err);
     }
+  }
+
+  // ─── Helper: tarjetas de la baraja activa ─────────────────────────────
+  _cardsInCurrentDeck() {
+    return this._cards.filter(c => c.deck === this._currentDeck);
   }
 
   // ─── Navegación ───────────────────────────────────────────────────────
   _navigateTo(viewName) {
-    // Actualizar nav buttons
     this.$navBtns.forEach(btn => {
       btn.classList.toggle("active", btn.dataset.view === viewName);
     });
 
-    // Mostrar/ocultar vistas
     Object.entries(this.$views).forEach(([name, el]) => {
       el.classList.toggle("hidden", name !== viewName);
     });
 
-    // Al abrir "edit" renderizamos la lista
     if (viewName === "edit") {
       this.$searchInput.value = "";
       this._renderCardList();
     }
-
-    // Al abrir "review" preparamos la siguiente tarjeta
-    if (viewName === "review") {
-      this._renderReview();
-    }
-
-    if (viewName === "histograma") {
-      this._renderHistogram();
-    }
+    if (viewName === "review") this._renderReview();
+    if (viewName === "histograma") this._renderHistogram();
   }
 
-  // ─── Badges de contador ───────────────────────────────────────────────
   _updateBadges() {
-    const n = this._cards.length;
+    const n = this._cardsInCurrentDeck().length;
     const label = n === 1 ? "1 tarjeta" : `${n} tarjetas`;
     this.$reviewCount.textContent    = label;
     this.$editCount.textContent      = label;
@@ -454,10 +445,130 @@ class App {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
+  //  DECK BAR + MODAL
+  // ═══════════════════════════════════════════════════════════════════════
+  _refreshDeckBar() {
+    this.$deckBarName.textContent = this._currentDeck ?? "Baraja";
+  }
+
+  _openDeckModal() {
+    this._renderDeckList();
+    this.$deckNewName.value = "";
+    this.$deckFeedback.classList.add("hidden");
+    this.$deckModalOverlay.classList.remove("hidden");
+  }
+
+  _closeDeckModal() {
+    this.$deckModalOverlay.classList.add("hidden");
+  }
+
+  _renderDeckList() {
+    this.$deckList.innerHTML = "";
+
+    this._decks.forEach(deck => {
+      const count = this._cards.filter(c => c.deck === deck.name).length;
+
+      const item = document.createElement("div");
+      item.className = "deck-list-item" + (deck.name === this._currentDeck ? " active" : "");
+      item.innerHTML = `
+        <span class="deck-list-item-name">${this._esc(deck.name)}</span>
+        <span class="deck-list-item-count">${count}</span>
+        <button class="deck-delete-btn" title="Eliminar baraja">✕</button>
+      `;
+
+      item.querySelector(".deck-list-item-name").addEventListener("click", () => this._selectDeck(deck.name));
+      item.querySelector(".deck-list-item-count").addEventListener("click", () => this._selectDeck(deck.name));
+      item.querySelector(".deck-delete-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._deleteDeck(deck);
+      });
+
+      this.$deckList.appendChild(item);
+    });
+  }
+
+  _selectDeck(name) {
+    this._currentDeck = name;
+    localStorage.setItem(LS_CURRENT_DECK_KEY, name);
+    this._refreshDeckBar();
+    this._session.updateCards(this._cardsInCurrentDeck());
+    this._updateBadges();
+    this._closeDeckModal();
+
+    // Refrescar la vista activa
+    const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
+    if (activeViewName === "review") this._renderReview();
+    if (activeViewName === "edit") this._renderCardList();
+    if (activeViewName === "histograma") this._renderHistogram();
+  }
+
+  async _createDeck() {
+    const name = this.$deckNewName.value.trim();
+
+    if (!name) {
+      this._showFeedback(this.$deckFeedback, "Escribe un nombre para la baraja.", "error");
+      return;
+    }
+    if (this._decks.some(d => d.name.toLowerCase() === name.toLowerCase())) {
+      this._showFeedback(this.$deckFeedback, "Ya existe una baraja con ese nombre.", "error");
+      return;
+    }
+
+    try {
+      const deck = await this._deckRepo.add(name);
+      this._decks.push(deck);
+      this.$deckNewName.value = "";
+      this._renderDeckList();
+      this._selectDeck(name);
+      this._openDeckModal(); // volver a abrir tras seleccionar, para poder seguir gestionando
+    } catch (err) {
+      this._showFeedback(this.$deckFeedback, "Error al crear la baraja.", "error");
+      console.error(err);
+    }
+  }
+
+  async _deleteDeck(deck) {
+    if (this._decks.length <= 1) {
+      this._showFeedback(this.$deckFeedback, "No puedes eliminar la única baraja.", "error");
+      return;
+    }
+
+    const count = this._cards.filter(c => c.deck === deck.name).length;
+    const msg = count > 0
+      ? `¿Eliminar "${deck.name}" y sus ${count} tarjeta${count === 1 ? "" : "s"}? Esta acción no se puede deshacer.`
+      : `¿Eliminar la baraja "${deck.name}"?`;
+
+    if (!confirm(msg)) return;
+
+    try {
+      const cardsToDelete = this._cards.filter(c => c.deck === deck.name);
+      for (const card of cardsToDelete) {
+        await this._cardRepo.remove(card.id);
+      }
+      await this._deckRepo.remove(deck.id);
+
+      this._cards = this._cards.filter(c => c.deck !== deck.name);
+      this._decks = this._decks.filter(d => d.id !== deck.id);
+
+      if (this._currentDeck === deck.name) {
+        this._currentDeck = this._decks[0].name;
+        localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
+        this._refreshDeckBar();
+      }
+
+      this._session.updateCards(this._cardsInCurrentDeck());
+      this._updateBadges();
+      this._renderDeckList();
+    } catch (err) {
+      this._showFeedback(this.$deckFeedback, "Error al eliminar la baraja.", "error");
+      console.error(err);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
   //  VIEW: REVIEW
   // ═══════════════════════════════════════════════════════════════════════
   _renderReview() {
-    // Resetear estado visual
     this.$cardFlipper.classList.remove("flipped");
     this.$ratingArea.classList.add("hidden");
 
@@ -469,11 +580,9 @@ class App {
     }
 
     this.$reviewEmpty.classList.add("hidden");
-
     const card = this._session.pick();
 
     if (!card) {
-      // Ninguna tarjeta está vencida todavía
       this.$cardScene.classList.add("hidden");
       this.$reviewWaiting.classList.remove("hidden");
       return;
@@ -482,18 +591,16 @@ class App {
     this.$reviewWaiting.classList.add("hidden");
     this.$cardFrontText.textContent = card.front;
     this.$cardBackText.textContent  = card.back;
-
     this.$cardScene.classList.remove("hidden");
   }
 
   _flipCard() {
     this.$cardFlipper.classList.add("flipped");
-    // Mostrar valoración tras la animación
     setTimeout(() => this.$ratingArea.classList.remove("hidden"), 300);
   }
 
   _renderHistogram() {
-    const cards = this._cards;
+    const cards = this._cardsInCurrentDeck();
     if (cards.length === 0) {
       this.$histogramEmpty.classList.remove("hidden");
       this.$histogramChart.innerHTML = "";
@@ -549,18 +656,11 @@ class App {
     }).join("");
   }
 
-  /** @param {boolean} success – true si acierto, false si fallo */
   async _rateCard(success) {
     const ratedCard = this._session.recordRating(success);
-
-    // Persistir el nuevo intervalo en Firestore de forma asíncrona (sin bloquear la UI)
     if (ratedCard) {
-      this._repo.update(ratedCard).catch(err =>
-        console.error("Error persistiendo intervalo:", err)
-      );
+      this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
     }
-
-    // Pequeña pausa visual antes de la siguiente tarjeta
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
@@ -568,98 +668,90 @@ class App {
 
   async _repeatCard() {
     const card = this._session.recordRepeat();
-
     if (card) {
-      this._repo.update(card).catch(err =>
-        console.error("Error persistiendo repetición:", err)
-      );
+      this._cardRepo.update(card).catch(err => console.error("Error persistiendo repetición:", err));
     }
-
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
   }
 
-  // ─── Gesto de swipe en la tarjeta volteada ────────────────────────────
-  // Derecha = acierto ("right" = correcto), izquierda = fallo, arriba = repetir
-_bindSwipeGesture() {
-  const SWIPE_THRESHOLD = 80;
-  const TILT_FACTOR     = 20;
-  const VSWIPE_THRESHOLD = 80; // umbral vertical para "repetir"
+  _bindSwipeGesture() {
+    const SWIPE_THRESHOLD  = 80;
+    const TILT_FACTOR      = 20;
+    const VSWIPE_THRESHOLD = 80;
 
-  let dragging = false;
-  let startX = 0, startY = 0;
-  let currentX = 0, currentY = 0;
+    let dragging = false;
+    let startX = 0, startY = 0;
+    let currentX = 0, currentY = 0;
 
-  const getX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
-  const getY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
+    const getX = (e) => (e.touches ? e.touches[0].clientX : e.clientX);
+    const getY = (e) => (e.touches ? e.touches[0].clientY : e.clientY);
 
-  const canSwipe = () =>
-    this.$cardFlipper.classList.contains("flipped") &&
-    !this.$ratingArea.classList.contains("hidden");
+    const canSwipe = () =>
+      this.$cardFlipper.classList.contains("flipped") &&
+      !this.$ratingArea.classList.contains("hidden");
 
-  const onStart = (e) => {
-    if (!canSwipe()) return;
-    dragging = true;
-    startX = currentX = getX(e);
-    startY = currentY = getY(e);
-    this.$cardFlipper.style.transition = "none";
-  };
+    const onStart = (e) => {
+      if (!canSwipe()) return;
+      dragging = true;
+      startX = currentX = getX(e);
+      startY = currentY = getY(e);
+      this.$cardFlipper.style.transition = "none";
+    };
 
-  const onMove = (e) => {
-    if (!dragging) return;
-    currentX = getX(e);
-    currentY = getY(e);
-    const dx = currentX - startX;
-    const dy = currentY - startY;
+    const onMove = (e) => {
+      if (!dragging) return;
+      currentX = getX(e);
+      currentY = getY(e);
+      const dx = currentX - startX;
+      const dy = currentY - startY;
 
-    this.$cardFlipper.style.transform =
-      `translate(${dx}px, ${dy}px) rotate(${dx / TILT_FACTOR}deg) rotateY(180deg)`;
+      this.$cardFlipper.style.transform =
+        `translate(${dx}px, ${dy}px) rotate(${dx / TILT_FACTOR}deg) rotateY(180deg)`;
 
-    // Prioridad: si el movimiento vertical hacia arriba es dominante, se marca "repetir"
-    const verticalDominant = -dy > Math.abs(dx);
+      const verticalDominant = -dy > Math.abs(dx);
 
-    this.$cardScene.classList.toggle("swipe-success", !verticalDominant && dx >  SWIPE_THRESHOLD * 0.4);
-    this.$cardScene.classList.toggle("swipe-fail",    !verticalDominant && dx < -SWIPE_THRESHOLD * 0.4);
-    this.$cardScene.classList.toggle("swipe-repeat",   verticalDominant && -dy > VSWIPE_THRESHOLD * 0.4);
-  };
+      this.$cardScene.classList.toggle("swipe-success", !verticalDominant && dx >  SWIPE_THRESHOLD * 0.4);
+      this.$cardScene.classList.toggle("swipe-fail",    !verticalDominant && dx < -SWIPE_THRESHOLD * 0.4);
+      this.$cardScene.classList.toggle("swipe-repeat",   verticalDominant && -dy > VSWIPE_THRESHOLD * 0.4);
+    };
 
-  const onEnd = () => {
-    if (!dragging) return;
-    dragging = false;
-    const dx = currentX - startX;
-    const dy = currentY - startY;
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      const dx = currentX - startX;
+      const dy = currentY - startY;
 
-    this.$cardFlipper.style.transition = "";
-    this.$cardFlipper.style.transform  = "";
-    this.$cardScene.classList.remove("swipe-success", "swipe-fail", "swipe-repeat");
+      this.$cardFlipper.style.transition = "";
+      this.$cardFlipper.style.transform  = "";
+      this.$cardScene.classList.remove("swipe-success", "swipe-fail", "swipe-repeat");
 
-    const verticalDominant = -dy > Math.abs(dx);
+      const verticalDominant = -dy > Math.abs(dx);
 
-    if (verticalDominant && -dy > VSWIPE_THRESHOLD) {
-      this._repeatCard();
-    } else if (!verticalDominant && Math.abs(dx) > SWIPE_THRESHOLD) {
-      this._rateCard(dx > 0);
-    }
-  };
+      if (verticalDominant && -dy > VSWIPE_THRESHOLD) {
+        this._repeatCard();
+      } else if (!verticalDominant && Math.abs(dx) > SWIPE_THRESHOLD) {
+        this._rateCard(dx > 0);
+      }
+    };
 
-  this.$cardScene.addEventListener("touchstart", onStart, { passive: true });
-  this.$cardScene.addEventListener("touchmove",  onMove,  { passive: true });
-  this.$cardScene.addEventListener("touchend",   onEnd);
+    this.$cardScene.addEventListener("touchstart", onStart, { passive: true });
+    this.$cardScene.addEventListener("touchmove",  onMove,  { passive: true });
+    this.$cardScene.addEventListener("touchend",   onEnd);
 
-  this.$cardScene.addEventListener("mousedown", onStart);
-  window.addEventListener("mousemove", onMove);
-  window.addEventListener("mouseup",   onEnd);
-}
+    this.$cardScene.addEventListener("mousedown", onStart);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup",   onEnd);
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   //  VIEW: EDIT
   // ═══════════════════════════════════════════════════════════════════════
   _renderCardList() {
     const filter  = this.$searchInput.value.trim();
-    const visible = filter
-      ? this._cards.filter(c => c.matches(filter))
-      : this._cards;
+    const inDeck  = this._cardsInCurrentDeck();
+    const visible = filter ? inDeck.filter(c => c.matches(filter)) : inDeck;
 
     this.$cardList.innerHTML = "";
 
@@ -683,12 +775,12 @@ _bindSwipeGesture() {
   }
 
   // ═══════════════════════════════════════════════════════════════════════
-  //  MODAL: Edit / Delete
+  //  MODAL: Edit / Delete card
   // ═══════════════════════════════════════════════════════════════════════
   _openModal(card) {
-    this._editingCard         = card;
-    this.$editFront.value     = card.front;
-    this.$editBack.value      = card.back;
+    this._editingCard     = card;
+    this.$editFront.value = card.front;
+    this.$editBack.value  = card.back;
     this.$editFeedback.classList.add("hidden");
     this.$modalOverlay.classList.remove("hidden");
   }
@@ -711,8 +803,8 @@ _bindSwipeGesture() {
     this._editingCard.back  = back;
 
     try {
-      await this._repo.update(this._editingCard);
-      this._session.updateCards(this._cards);
+      await this._cardRepo.update(this._editingCard);
+      this._session.updateCards(this._cardsInCurrentDeck());
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
@@ -726,9 +818,9 @@ _bindSwipeGesture() {
     if (!confirm(`¿Eliminar la tarjeta "${this._editingCard.front}"?`)) return;
 
     try {
-      await this._repo.remove(this._editingCard.id);
+      await this._cardRepo.remove(this._editingCard.id);
       this._cards = this._cards.filter(c => c.id !== this._editingCard.id);
-      this._session.updateCards(this._cards);
+      this._session.updateCards(this._cardsInCurrentDeck());
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
@@ -752,18 +844,17 @@ _bindSwipeGesture() {
     }
 
     try {
-      const cards = [new Card("", front, back)];
-      if (double) cards.push(new Card("", back, front));
+      const cards = [new Card("", front, back, this._currentDeck)];
+      if (double) cards.push(new Card("", back, front, this._currentDeck));
 
       for (const card of cards) {
-        await this._repo.add(card);
+        await this._cardRepo.add(card);
         this._cards.push(card);
       }
 
-      this._session.updateCards(this._cards);
+      this._session.updateCards(this._cardsInCurrentDeck());
       this._updateBadges();
 
-      // Limpiar formulario
       this.$addFront.value = "";
       this.$addBack.value  = "";
       this.$addDouble.checked = true;
@@ -772,20 +863,15 @@ _bindSwipeGesture() {
         ? "✓ Dos tarjetas añadidas (frente→dorso y dorso→frente)."
         : "✓ Tarjeta añadida.";
       this._showFeedback(this.$addFeedback, msg, "success");
-
     } catch (err) {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
-    }   
+    }
   }
-    
-_switchAddTab(tabName) {
-    this.$addTabBtns.forEach(btn =>
-      btn.classList.toggle("active", btn.dataset.tab === tabName)
-    );
-    this.$addPanels.forEach(panel =>
-      panel.classList.toggle("hidden", panel.dataset.panel !== tabName)
-    );
+
+  _switchAddTab(tabName) {
+    this.$addTabBtns.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabName));
+    this.$addPanels.forEach(panel => panel.classList.toggle("hidden", panel.dataset.panel !== tabName));
   }
 
   async _addBatch() {
@@ -824,31 +910,29 @@ _switchAddTab(tabName) {
     try {
       let count = 0;
       for (const { front, back } of parsed) {
-        const cards = [new Card("", front, back)];
-        if (double) cards.push(new Card("", back, front));
+        const cards = [new Card("", front, back, this._currentDeck)];
+        if (double) cards.push(new Card("", back, front, this._currentDeck));
 
         for (const card of cards) {
-          await this._repo.add(card);
+          await this._cardRepo.add(card);
           this._cards.push(card);
           count++;
         }
       }
 
-      this._session.updateCards(this._cards);
+      this._session.updateCards(this._cardsInCurrentDeck());
       this._updateBadges();
       this.$addBatchText.value = "";
 
       let msg = `✓ ${count} tarjeta${count === 1 ? "" : "s"} añadida${count === 1 ? "" : "s"}.`;
-      if (invalid.length > 0) {
-        msg += ` Líneas ignoradas: ${invalid.join(", ")}.`;
-      }
+      if (invalid.length > 0) msg += ` Líneas ignoradas: ${invalid.join(", ")}.`;
       this._showFeedback(this.$addBatchFeedback, msg, invalid.length > 0 ? "error" : "success");
-
     } catch (err) {
       this._showFeedback(this.$addBatchFeedback, "Error al añadir el lote.", "error");
       console.error(err);
     }
   }
+
   // ─── Helpers ──────────────────────────────────────────────────────────
   _showFeedback(el, msg, type) {
     el.textContent = msg;
@@ -857,7 +941,6 @@ _switchAddTab(tabName) {
     setTimeout(() => el.classList.add("hidden"), 4000);
   }
 
-  /** Escapa HTML para evitar XSS al insertar texto de tarjetas en el DOM */
   _esc(str) {
     return str
       .replace(/&/g, "&amp;")
@@ -873,13 +956,12 @@ _switchAddTab(tabName) {
 const firebaseApp = initializeApp(firebaseConfig);
 const db          = getFirestore(firebaseApp);
 const auth        = getAuth(firebaseApp);
-const repository  = new CardRepository(db);
-const app         = new App(repository);
+const cardRepo    = new CardRepository(db);
+const deckRepo    = new DeckRepository(db);
+const app         = new App(cardRepo, deckRepo);
 
 onAuthStateChanged(auth, (user) => {
-  if (user) {
-    app.init(); // ya autenticado, arrancamos la app
-  }
+  if (user) app.init();
 });
 
 signInAnonymously(auth).catch(err => console.error("Error de autenticación:", err));

@@ -656,3 +656,119 @@ input { font-family: inherit; }
   .card-flipper { transition: none; }
   .modal        { animation: none; }
 }
+
+
+
+/* ═══════════════════════════════════════════════════════
+   DECK BAR
+═══════════════════════════════════════════════════════ */
+.deck-bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  background: var(--surface);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  z-index: 60;
+}
+
+.deck-bar-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  transition: background var(--transition);
+}
+
+.deck-bar-btn:hover { background: rgba(233,69,96,0.15); }
+.deck-bar-caret { color: var(--text-muted); font-size: 0.75rem; }
+
+/* Desplaza todas las vistas hacia abajo para dejar hueco a la deck-bar */
+.view { inset: 52px 0 var(--nav-h) 0; }
+
+/* ═══════════════════════════════════════════════════════
+   DECK MODAL LIST
+═══════════════════════════════════════════════════════ */
+.deck-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.deck-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--surface-alt);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+
+.deck-list-item:hover { background: rgba(233,69,96,0.1); }
+
+.deck-list-item.active {
+  border-color: var(--accent);
+}
+
+.deck-list-item-name {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deck-list-item-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.deck-delete-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+
+.deck-delete-btn:hover { background: rgba(233,69,96,0.2); color: var(--accent); }
+
+.deck-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.deck-add-row .search-input { flex: 1; }
+
+.deck-add-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+.deck-add-btn:hover { background: var(--accent-dim); }

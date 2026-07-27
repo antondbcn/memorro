@@ -10,6 +10,16 @@
 </head>
 <body>
 
+    <!-- ═══════════════════════════════ DECK BAR ═══════════════════════════════ -->
+  <div class="deck-bar">
+    <button id="deck-bar-btn" class="deck-bar-btn">
+      <span class="deck-bar-icon">🗂️</span>
+      <span id="deck-bar-name">Baraja</span>
+      <span class="deck-bar-caret">▾</span>
+    </button>
+  </div>
+
+    
   <!-- ═══════════════════════════════════════ VIEWS ═══════════════════════════════════════ -->
 
   <!-- VIEW: Review -->
@@ -202,6 +212,25 @@
       <span>Histograma</span>
     </button>
   </nav>
+
+<!-- ══════════════════════════════ MODAL: Decks ══════════════════════════════ -->
+  <div id="deck-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Barajas</span>
+        <button id="btn-deck-modal-close" class="btn-icon">✕</button>
+      </div>
+
+      <div id="deck-list" class="deck-list"></div>
+
+      <div class="deck-add-row">
+        <input id="deck-new-name" type="text" class="search-input" placeholder="Nueva baraja…" autocomplete="off" />
+        <button id="btn-deck-add" class="btn-icon deck-add-btn">＋</button>
+      </div>
+
+      <p id="deck-feedback" class="form-feedback hidden"></p>
+    </div>
+  </div>
 
   <!-- Firebase SDK -->
   <script type="module" src="app.js"></script>
