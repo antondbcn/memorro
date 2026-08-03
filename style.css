@@ -11,6 +11,7 @@
   --text-muted:  #7A7A9D;
   --success:     #4CAF82;
   --warning:     #F0A500;
+  --info:        #4C8CDC;
   --radius-sm:   8px;
   --radius-md:   16px;
   --radius-lg:   24px;
@@ -173,6 +174,7 @@ input { font-family: inherit; }
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
   box-shadow: var(--shadow);
+  transition: border-color var(--transition), background var(--transition);
 }
 
 .card-front {
@@ -184,6 +186,27 @@ input { font-family: inherit; }
   background: var(--surface-alt);
   border: 1px solid rgba(233,69,96,0.25);
   transform: rotateY(180deg);
+}
+
+/* CATEGORÍA DE LA TARJETA (colorea el frente según cómo se ha elegido)
+   - ontime  → dentro de su ventana de vencimiento (acento rosa, el color base)
+   - overdue → vencida más allá del margen (naranja/warning)
+   - new     → nunca repasada (azul/info) */
+.card-scene.card-ontime .card-front {
+  border-color: rgba(233,69,96,0.55);
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(233,69,96,0.12);
+}
+
+.card-scene.card-overdue .card-front {
+  border-color: rgba(240,165,0,0.6);
+  background: linear-gradient(180deg, var(--surface) 0%, rgba(240,165,0,0.07) 100%);
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(240,165,0,0.14);
+}
+
+.card-scene.card-new .card-front {
+  border-color: rgba(76,140,220,0.6);
+  background: linear-gradient(180deg, var(--surface) 0%, rgba(76,140,220,0.08) 100%);
+  box-shadow: var(--shadow), inset 0 0 0 1px rgba(76,140,220,0.16);
 }
 
 /* SWIPE FEEDBACK (móvil): arrastrar la tarjeta volteada indica la valoración */

@@ -146,46 +146,65 @@ class DeckRepository {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  CLASS: ReviewSession  (sin cambios de lógica, solo opera sobre el subconjunto
-//  de tarjetas que le pase la App)
+//  CLASS: ReviewSession
+//
+//  Cuatro categorías de tarjetas, en orden de prioridad:
+//   1. "ontime"  – dentro de ±10% de su intervalo (ventana de vencimiento)
+//   2. "overdue" – vencidas más allá de ese margen
+//   3. (no se muestran nunca: las que aún no han llegado a su momento)
+//   4. "new"     – nunca repasadas
+//
+//  Dentro de cada categoría con más de un candidato, la elección es
+//  uniformemente aleatoria (no solo entre las "más vencidas").
 // ═══════════════════════════════════════════════════════════════════════════
 class ReviewSession {
   constructor(cards) {
-    this._cards   = [...cards];
-    this._current = null;
+    this._cards           = [...cards];
+    this._current         = null;
+    this._currentCategory = null;
   }
 
   get hasCards() { return this._cards.length > 0; }
+
+  get currentCategory() { return this._currentCategory; }
 
   pick() {
     if (!this.hasCards) return null;
     const now = new Date();
 
-    const dueCards = this._cards
+    const dueEntries = this._cards
       .filter(card => card.lastReviewed)
       .map(card => ({ card, overdueMin: (now - card.dueAt) / 60000 }))
       .filter(entry => entry.overdueMin >= 0);
 
-    if (dueCards.length > 0) {
-      const marginCards = dueCards.filter(entry =>
+    if (dueEntries.length > 0) {
+      const marginEntries = dueEntries.filter(entry =>
         entry.overdueMin <= Math.max(1, entry.card.interval * 0.1)
       );
 
-      if (marginCards.length > 0) {
-        marginCards.sort((a, b) => b.overdueMin - a.overdueMin);
-        const maxOverdue = marginCards[0].overdueMin;
-        const tied = marginCards.filter(entry => Math.abs(entry.overdueMin - maxOverdue) < 1e-6);
-        this._current = tied[Math.floor(Math.random() * tied.length)].card;
+      if (marginEntries.length > 0) {
+        const chosen = marginEntries[Math.floor(Math.random() * marginEntries.length)];
+        this._current         = chosen.card;
+        this._currentCategory = "ontime";
         return this._current;
       }
 
-      this._current = dueCards[Math.floor(Math.random() * dueCards.length)].card;
+      const chosen = dueEntries[Math.floor(Math.random() * dueEntries.length)];
+      this._current         = chosen.card;
+      this._currentCategory = "overdue";
       return this._current;
     }
 
-    const newCard = this._cards.find(card => !card.lastReviewed);
-    this._current = newCard ?? null;
-    return this._current;
+    const newCards = this._cards.filter(card => !card.lastReviewed);
+    if (newCards.length > 0) {
+      this._current         = newCards[Math.floor(Math.random() * newCards.length)];
+      this._currentCategory = "new";
+      return this._current;
+    }
+
+    this._current         = null;
+    this._currentCategory = null;
+    return null;
   }
 
   recordRating(success) {
@@ -591,6 +610,11 @@ class App {
     this.$reviewWaiting.classList.add("hidden");
     this.$cardFrontText.textContent = card.front;
     this.$cardBackText.textContent  = card.back;
+
+    // Colorea la tarjeta según la categoría que la ha originado
+    this.$cardScene.classList.remove("card-ontime", "card-overdue", "card-new");
+    this.$cardScene.classList.add(`card-${this._session.currentCategory}`);
+
     this.$cardScene.classList.remove("hidden");
   }
 
@@ -857,7 +881,8 @@ class App {
 
       this.$addFront.value = "";
       this.$addBack.value  = "";
-      this.$addDouble.checked = true;
+      // Nota: el toggle "doble/simple" NO se resetea aquí a propósito,
+      // para que recuerde la última posición elegida durante la sesión.
 
       const msg = double
         ? "✓ Dos tarjetas añadidas (frente→dorso y dorso→frente)."
