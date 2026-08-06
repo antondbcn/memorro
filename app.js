@@ -15,6 +15,11 @@ const FAILURE_MULTIPLIER   = 0.5;
 const DEFAULT_DECK_NAME    = "General";
 const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
 
+// Umbral de auto-eliminación: si el intervalo de una tarjeta supera este
+// valor (en minutos), se considera "dominada" y se borra automáticamente
+// al calcularse tras un repaso. 10 días = 10 * 24 * 60.
+const AUTO_DELETE_INTERVAL_MIN = 10 * 24 * 60;
+
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
   authDomain: "memorro-b4939.firebaseapp.com",
@@ -683,11 +688,24 @@ class App {
   async _rateCard(success) {
     const ratedCard = this._session.recordRating(success);
     if (ratedCard) {
-      this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
+      if (ratedCard.interval > AUTO_DELETE_INTERVAL_MIN) {
+        this._autoDeleteCard(ratedCard);
+      } else {
+        this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
+      }
     }
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
+  }
+
+  // Elimina una tarjeta cuyo intervalo ha superado AUTO_DELETE_INTERVAL_MIN:
+  // se considera suficientemente "dominada" como para dejar de repasarla.
+  _autoDeleteCard(card) {
+    this._cardRepo.remove(card.id).catch(err => console.error("Error auto-eliminando tarjeta:", err));
+    this._cards = this._cards.filter(c => c.id !== card.id);
+    this._session.updateCards(this._cardsInCurrentDeck());
+    this._updateBadges();
   }
 
   async _repeatCard() {
