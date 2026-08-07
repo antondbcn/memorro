@@ -57,6 +57,12 @@ class Card {
     return new Date(this.lastReviewed.getTime() + this.interval * 60000);
   }
 
+  // Se considera "zombi" (dominada) cuando su intervalo supera el umbral.
+  // No se persiste en Firestore: se deduce del intervalo en cada lectura.
+  get zombie() {
+    return this.interval > AUTO_DELETE_INTERVAL_MIN;
+  }
+
   toFirestore() {
     return {
       front:        this.front,
@@ -429,7 +435,7 @@ class App {
       this._cards = await this._cardRepo.fetchAll();
 
       this._refreshDeckBar();
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this._renderReview();
     } catch (err) {
@@ -437,9 +443,22 @@ class App {
     }
   }
 
-  // ─── Helper: tarjetas de la baraja activa ─────────────────────────────
+  // ─── Helpers: tarjetas de la baraja activa ────────────────────────────
+  // Todas las tarjetas de la baraja, incluidas las zombis. Se usa
+  // únicamente para la comprobación de duplicados al añadir tarjetas.
   _cardsInCurrentDeck() {
     return this._cards.filter(c => c.deck === this._currentDeck);
+  }
+
+  // Tarjetas "vivas" de la baraja (excluye zombis). Es lo que se usa en
+  // la sesión de repaso, los contadores, la lista de edición y el histograma.
+  _activeCardsInCurrentDeck() {
+    return this._cardsInCurrentDeck().filter(c => !c.zombie);
+  }
+
+  // Clave normalizada para detectar coincidencia total frontal+dorso.
+  _cardKey(front, back) {
+    return `${front.trim().toLowerCase()}|||${back.trim().toLowerCase()}`;
   }
 
   // ─── Navegación ───────────────────────────────────────────────────────
@@ -461,7 +480,7 @@ class App {
   }
 
   _updateBadges() {
-    const n = this._cardsInCurrentDeck().length;
+    const n = this._activeCardsInCurrentDeck().length;
     const label = n === 1 ? "1 tarjeta" : `${n} tarjetas`;
     this.$reviewCount.textContent    = label;
     this.$editCount.textContent      = label;
@@ -515,7 +534,7 @@ class App {
     this._currentDeck = name;
     localStorage.setItem(LS_CURRENT_DECK_KEY, name);
     this._refreshDeckBar();
-    this._session.updateCards(this._cardsInCurrentDeck());
+    this._session.updateCards(this._activeCardsInCurrentDeck());
     this._updateBadges();
     this._closeDeckModal();
 
@@ -580,7 +599,7 @@ class App {
         this._refreshDeckBar();
       }
 
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this._renderDeckList();
     } catch (err) {
@@ -629,7 +648,7 @@ class App {
   }
 
   _renderHistogram() {
-    const cards = this._cardsInCurrentDeck();
+    const cards = this._activeCardsInCurrentDeck();
     if (cards.length === 0) {
       this.$histogramEmpty.classList.remove("hidden");
       this.$histogramChart.innerHTML = "";
@@ -688,24 +707,18 @@ class App {
   async _rateCard(success) {
     const ratedCard = this._session.recordRating(success);
     if (ratedCard) {
-      if (ratedCard.interval > AUTO_DELETE_INTERVAL_MIN) {
-        this._autoDeleteCard(ratedCard);
-      } else {
-        this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
+      this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
+      // Si la tarjeta ha entrado en estado zombi (dominada), sale de la
+      // sesión de repaso y de los contadores, pero permanece en Firestore
+      // para seguir contando en la comprobación de duplicados al añadir.
+      if (ratedCard.zombie) {
+        this._session.updateCards(this._activeCardsInCurrentDeck());
+        this._updateBadges();
       }
     }
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
     setTimeout(() => this._renderReview(), 150);
-  }
-
-  // Elimina una tarjeta cuyo intervalo ha superado AUTO_DELETE_INTERVAL_MIN:
-  // se considera suficientemente "dominada" como para dejar de repasarla.
-  _autoDeleteCard(card) {
-    this._cardRepo.remove(card.id).catch(err => console.error("Error auto-eliminando tarjeta:", err));
-    this._cards = this._cards.filter(c => c.id !== card.id);
-    this._session.updateCards(this._cardsInCurrentDeck());
-    this._updateBadges();
   }
 
   async _repeatCard() {
@@ -792,7 +805,7 @@ class App {
   // ═══════════════════════════════════════════════════════════════════════
   _renderCardList() {
     const filter  = this.$searchInput.value.trim();
-    const inDeck  = this._cardsInCurrentDeck();
+    const inDeck  = this._activeCardsInCurrentDeck();
     const visible = filter ? inDeck.filter(c => c.matches(filter)) : inDeck;
 
     this.$cardList.innerHTML = "";
@@ -846,7 +859,7 @@ class App {
 
     try {
       await this._cardRepo.update(this._editingCard);
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
@@ -862,7 +875,7 @@ class App {
     try {
       await this._cardRepo.remove(this._editingCard.id);
       this._cards = this._cards.filter(c => c.id !== this._editingCard.id);
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
@@ -886,15 +899,26 @@ class App {
     }
 
     try {
-      const cards = [new Card("", front, back, this._currentDeck)];
-      if (double) cards.push(new Card("", back, front, this._currentDeck));
+      const candidates = [{ front, back }];
+      if (double) candidates.push({ front: back, back: front });
 
-      for (const card of cards) {
+      const existingKeys = new Set(
+        this._cardsInCurrentDeck().map(c => this._cardKey(c.front, c.back))
+      );
+
+      let addedCount = 0;
+      for (const cand of candidates) {
+        const key = this._cardKey(cand.front, cand.back);
+        if (existingKeys.has(key)) continue; // duplicado: se omite de forma transparente
+
+        const card = new Card("", cand.front, cand.back, this._currentDeck);
         await this._cardRepo.add(card);
         this._cards.push(card);
+        existingKeys.add(key);
+        addedCount++;
       }
 
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
 
       this.$addFront.value = "";
@@ -951,23 +975,38 @@ class App {
     }
 
     try {
-      let count = 0;
-      for (const { front, back } of parsed) {
-        const cards = [new Card("", front, back, this._currentDeck)];
-        if (double) cards.push(new Card("", back, front, this._currentDeck));
+      const existingKeys = new Set(
+        this._cardsInCurrentDeck().map(c => this._cardKey(c.front, c.back))
+      );
 
-        for (const card of cards) {
+      let count = 0;
+      let duplicates = 0;
+
+      for (const { front, back } of parsed) {
+        const candidates = [{ front, back }];
+        if (double) candidates.push({ front: back, back: front });
+
+        for (const cand of candidates) {
+          const key = this._cardKey(cand.front, cand.back);
+          if (existingKeys.has(key)) {
+            duplicates++;
+            continue; // ya existe (o ya se añadió antes en este mismo lote)
+          }
+
+          const card = new Card("", cand.front, cand.back, this._currentDeck);
           await this._cardRepo.add(card);
           this._cards.push(card);
+          existingKeys.add(key);
           count++;
         }
       }
 
-      this._session.updateCards(this._cardsInCurrentDeck());
+      this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this.$addBatchText.value = "";
 
       let msg = `✓ ${count} tarjeta${count === 1 ? "" : "s"} añadida${count === 1 ? "" : "s"}.`;
+      if (duplicates > 0) msg += ` Duplicadas ignoradas: ${duplicates}.`;
       if (invalid.length > 0) msg += ` Líneas ignoradas: ${invalid.join(", ")}.`;
       this._showFeedback(this.$addBatchFeedback, msg, invalid.length > 0 ? "error" : "success");
     } catch (err) {
