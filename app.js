@@ -907,9 +907,10 @@ class App {
       );
 
       let addedCount = 0;
+      let duplicateCount = 0;
       for (const cand of candidates) {
         const key = this._cardKey(cand.front, cand.back);
-        if (existingKeys.has(key)) continue; // duplicado: se omite de forma transparente
+        if (existingKeys.has(key)) { duplicateCount++; continue; } // duplicado: se omite de forma transparente
 
         const card = new Card("", cand.front, cand.back, this._currentDeck);
         await this._cardRepo.add(card);
@@ -926,10 +927,22 @@ class App {
       // Nota: el toggle "doble/simple" NO se resetea aquí a propósito,
       // para que recuerde la última posición elegida durante la sesión.
 
-      const msg = double
-        ? "✓ Dos tarjetas añadidas (frente→dorso y dorso→frente)."
-        : "✓ Tarjeta añadida.";
-      this._showFeedback(this.$addFeedback, msg, "success");
+      let msg;
+      let feedbackType;
+      if (addedCount === 0) {
+        msg = "Ninguna tarjeta añadida (ya existía).";
+        feedbackType = "error";
+      } else if (addedCount === candidates.length) {
+        msg = addedCount === 2
+          ? "✓ Dos tarjetas añadidas (frente→dorso y dorso→frente)."
+          : "✓ Tarjeta añadida.";
+        feedbackType = "success";
+      } else {
+        // Caso "doble" con una de las dos ya existente
+        msg = "✓ 1 tarjeta añadida (la otra ya existía).";
+        feedbackType = "success";
+      }
+      this._showFeedback(this.$addFeedback, msg, feedbackType);
     } catch (err) {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
@@ -1005,10 +1018,13 @@ class App {
       this._updateBadges();
       this.$addBatchText.value = "";
 
-      let msg = `✓ ${count} tarjeta${count === 1 ? "" : "s"} añadida${count === 1 ? "" : "s"}.`;
+      let msg = count === 0
+        ? "Ninguna tarjeta añadida."
+        : `✓ ${count} tarjeta${count === 1 ? "" : "s"} añadida${count === 1 ? "" : "s"}.`;
       if (duplicates > 0) msg += ` Duplicadas ignoradas: ${duplicates}.`;
       if (invalid.length > 0) msg += ` Líneas ignoradas: ${invalid.join(", ")}.`;
-      this._showFeedback(this.$addBatchFeedback, msg, invalid.length > 0 ? "error" : "success");
+      const feedbackType = (count === 0 || invalid.length > 0) ? "error" : "success";
+      this._showFeedback(this.$addBatchFeedback, msg, feedbackType);
     } catch (err) {
       this._showFeedback(this.$addBatchFeedback, "Error al añadir el lote.", "error");
       console.error(err);
