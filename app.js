@@ -1003,7 +1003,12 @@ async _addCard() {
     }
   }
 
-async _addBatch() {
+  _switchAddTab(tabName) {
+    this.$addTabBtns.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabName));
+    this.$addPanels.forEach(panel => panel.classList.toggle("hidden", panel.dataset.panel !== tabName));
+  }
+
+  async _addBatch() {
     const lines = this.$addBatchText.value
       .split("\n")
       .map(l => l.trim())
