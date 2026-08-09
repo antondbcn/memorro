@@ -416,8 +416,6 @@ class App {
       if (e.target === this.$modalOverlay) this._closeModal();
     });
 
-    this.$btnModalSave.addEventListener("click",   () => this._saveEdit());
-    this.$btnModalDelete.addEventListener("click", () => this._deleteCard());
   }
 
   // ─── Inicialización ───────────────────────────────────────────────────
