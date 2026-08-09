@@ -438,6 +438,47 @@ input { font-family: inherit; }
 
 .btn-primary:hover  { background: var(--accent-dim); transform: translateY(-1px); }
 .btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled,
+.btn-primary.btn-loading {
+  opacity: 0.6;
+  cursor: wait !important;
+  pointer-events: none;
+}
+
+/* Botón resucitar zombis */
+.deck-resurrect-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  transition: background var(--transition), color var(--transition);
+}
+
+.deck-resurrect-btn:hover:not(:disabled) { background: rgba(76,175,130,0.2); color: var(--success); }
+.deck-resurrect-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* Ajuste para que el nombre no empuje los botones con el 4º elemento */
+.deck-list-item-name { flex: 1; min-width: 0; }
+
+/* Botón zombificar */
+.btn-warning {
+  background: transparent;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-md);
+  padding: 13px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  width: 100%;
+  transition: background var(--transition);
+}
+
+.btn-warning:hover { background: rgba(240,165,0,0.12); }
 
 .btn-danger {
   background: transparent;

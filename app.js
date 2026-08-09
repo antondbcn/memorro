@@ -328,13 +328,14 @@ class App {
     this.$addBatchFeedback = document.getElementById("add-batch-feedback");
 
     // Modal (edición de tarjeta)
-    this.$modalOverlay   = document.getElementById("modal-overlay");
-    this.$editFront      = document.getElementById("edit-front");
-    this.$editBack       = document.getElementById("edit-back");
-    this.$btnModalClose  = document.getElementById("btn-modal-close");
-    this.$btnModalSave   = document.getElementById("btn-modal-save");
-    this.$btnModalDelete = document.getElementById("btn-modal-delete");
-    this.$editFeedback   = document.getElementById("edit-feedback");
+    this.$modalOverlay    = document.getElementById("modal-overlay");
+    this.$editFront       = document.getElementById("edit-front");
+    this.$editBack        = document.getElementById("edit-back");
+    this.$btnModalClose   = document.getElementById("btn-modal-close");
+    this.$btnModalSave    = document.getElementById("btn-modal-save");
+    this.$btnModalDelete  = document.getElementById("btn-modal-delete");
+    this.$btnModalZombify = document.getElementById("btn-modal-zombify");
+    this.$editFeedback    = document.getElementById("edit-feedback");
 
     // Nav
     this.$navBtns = document.querySelectorAll(".nav-btn");
@@ -347,6 +348,9 @@ class App {
     });
 
     // Deck bar / modal
+    this.$btnModalSave.addEventListener("click",   () => this._saveEdit());
+    this.$btnModalDelete.addEventListener("click", () => this._deleteCard());
+    this.$btnModalZombify.addEventListener("click", () => this._zombifyCard());
     this.$deckBarBtn.addEventListener("click", () => this._openDeckModal());
     this.$btnDeckModalClose.addEventListener("click", () => this._closeDeckModal());
     this.$deckModalOverlay.addEventListener("click", (e) => {
@@ -443,6 +447,25 @@ class App {
     }
   }
 
+    async _zombifyCard() {
+    if (!this._editingCard) return;
+    if (!confirm(`¿Zombificar "${this._editingCard.front}"? Pasará a considerarse dominada: desaparecerá del repaso, la lista y el histograma, aunque seguirá en Firestore.`)) return;
+
+    this._editingCard.interval     = AUTO_DELETE_INTERVAL_MIN + 1;
+    this._editingCard.lastReviewed = new Date();
+
+    try {
+      await this._cardRepo.update(this._editingCard);
+      this._session.updateCards(this._activeCardsInCurrentDeck());
+      this._updateBadges();
+      this._closeModal();
+      this._renderCardList();
+    } catch (err) {
+      this._showFeedback(this.$editFeedback, "Error al zombificar.", "error");
+      console.error(err);
+    }
+  }
+
   // ─── Helpers: tarjetas de la baraja activa ────────────────────────────
   // Todas las tarjetas de la baraja, incluidas las zombis. Se usa
   // únicamente para la comprobación de duplicados al añadir tarjetas.
@@ -509,18 +532,24 @@ class App {
     this.$deckList.innerHTML = "";
 
     this._decks.forEach(deck => {
-      const count = this._cards.filter(c => c.deck === deck.name).length;
+      const count       = this._cards.filter(c => c.deck === deck.name).length;
+      const zombieCount = this._cards.filter(c => c.deck === deck.name && c.zombie).length;
 
       const item = document.createElement("div");
       item.className = "deck-list-item" + (deck.name === this._currentDeck ? " active" : "");
       item.innerHTML = `
         <span class="deck-list-item-name">${this._esc(deck.name)}</span>
         <span class="deck-list-item-count">${count}</span>
+        <button class="deck-resurrect-btn" title="Resucitar zombis (${zombieCount})" ${zombieCount === 0 ? "disabled" : ""}>♻️</button>
         <button class="deck-delete-btn" title="Eliminar baraja">✕</button>
       `;
 
       item.querySelector(".deck-list-item-name").addEventListener("click", () => this._selectDeck(deck.name));
       item.querySelector(".deck-list-item-count").addEventListener("click", () => this._selectDeck(deck.name));
+      item.querySelector(".deck-resurrect-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._resurrectZombies(deck);
+      });
       item.querySelector(".deck-delete-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         this._deleteDeck(deck);
@@ -528,6 +557,33 @@ class App {
 
       this.$deckList.appendChild(item);
     });
+  }
+
+  async _resurrectZombies(deck) {
+    const zombies = this._cards.filter(c => c.deck === deck.name && c.zombie);
+    if (zombies.length === 0) return;
+
+    const n = zombies.length;
+    if (!confirm(`¿Resucitar ${n} tarjeta${n === 1 ? "" : "s"} dominada${n === 1 ? "" : "s"} de "${deck.name}"? Se les aplicará un "no me acuerdo" y volverán a repasarse.`)) return;
+
+    try {
+      for (const card of zombies) {
+        card.interval     = 3; // mismo valor que un fallo en primera revisión
+        card.lastReviewed = new Date();
+        await this._cardRepo.update(card);
+      }
+
+      if (deck.name === this._currentDeck) {
+        this._session.updateCards(this._activeCardsInCurrentDeck());
+        this._updateBadges();
+      }
+
+      this._renderDeckList();
+      this._showFeedback(this.$deckFeedback, `✓ ${n} tarjeta${n === 1 ? "" : "s"} resucitada${n === 1 ? "" : "s"}.`, "success");
+    } catch (err) {
+      this._showFeedback(this.$deckFeedback, "Error al resucitar zombis.", "error");
+      console.error(err);
+    }
   }
 
   _selectDeck(name) {
@@ -888,7 +944,7 @@ class App {
   // ═══════════════════════════════════════════════════════════════════════
   //  VIEW: ADD
   // ═══════════════════════════════════════════════════════════════════════
-  async _addCard() {
+async _addCard() {
     const front  = this.$addFront.value.trim();
     const back   = this.$addBack.value.trim();
     const double = this.$addDouble.checked;
@@ -898,6 +954,7 @@ class App {
       return;
     }
 
+    this._setButtonLoading(this.$btnAddSave, true);
     try {
       const candidates = [{ front, back }];
       if (double) candidates.push({ front: back, back: front });
@@ -910,7 +967,7 @@ class App {
       let duplicateCount = 0;
       for (const cand of candidates) {
         const key = this._cardKey(cand.front, cand.back);
-        if (existingKeys.has(key)) { duplicateCount++; continue; } // duplicado: se omite de forma transparente
+        if (existingKeys.has(key)) { duplicateCount++; continue; }
 
         const card = new Card("", cand.front, cand.back, this._currentDeck);
         await this._cardRepo.add(card);
@@ -924,8 +981,6 @@ class App {
 
       this.$addFront.value = "";
       this.$addBack.value  = "";
-      // Nota: el toggle "doble/simple" NO se resetea aquí a propósito,
-      // para que recuerde la última posición elegida durante la sesión.
 
       let msg;
       let feedbackType;
@@ -938,7 +993,6 @@ class App {
           : "✓ Tarjeta añadida.";
         feedbackType = "success";
       } else {
-        // Caso "doble" con una de las dos ya existente
         msg = "✓ 1 tarjeta añadida (la otra ya existía).";
         feedbackType = "success";
       }
@@ -946,15 +1000,12 @@ class App {
     } catch (err) {
       this._showFeedback(this.$addFeedback, "Error al añadir la tarjeta.", "error");
       console.error(err);
+    } finally {
+      this._setButtonLoading(this.$btnAddSave, false);
     }
   }
 
-  _switchAddTab(tabName) {
-    this.$addTabBtns.forEach(btn => btn.classList.toggle("active", btn.dataset.tab === tabName));
-    this.$addPanels.forEach(panel => panel.classList.toggle("hidden", panel.dataset.panel !== tabName));
-  }
-
-  async _addBatch() {
+async _addBatch() {
     const lines = this.$addBatchText.value
       .split("\n")
       .map(l => l.trim())
@@ -987,6 +1038,7 @@ class App {
       return;
     }
 
+    this._setButtonLoading(this.$btnAddBatchSave, true);
     try {
       const existingKeys = new Set(
         this._cardsInCurrentDeck().map(c => this._cardKey(c.front, c.back))
@@ -1003,7 +1055,7 @@ class App {
           const key = this._cardKey(cand.front, cand.back);
           if (existingKeys.has(key)) {
             duplicates++;
-            continue; // ya existe (o ya se añadió antes en este mismo lote)
+            continue;
           }
 
           const card = new Card("", cand.front, cand.back, this._currentDeck);
@@ -1028,10 +1080,17 @@ class App {
     } catch (err) {
       this._showFeedback(this.$addBatchFeedback, "Error al añadir el lote.", "error");
       console.error(err);
+    } finally {
+      this._setButtonLoading(this.$btnAddBatchSave, false);
     }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────
+  _setButtonLoading(btn, loading) {
+    btn.disabled = loading;
+    btn.classList.toggle("btn-loading", loading);
+  }
+
   _showFeedback(el, msg, type) {
     el.textContent = msg;
     el.className   = `form-feedback ${type}`;
