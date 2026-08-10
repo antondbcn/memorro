@@ -298,6 +298,7 @@ class App {
     this.$ratingArea    = document.getElementById("rating-area");
     this.$reviewEmpty   = document.getElementById("review-empty");
     this.$reviewWaiting = document.getElementById("review-waiting");
+    this.$reviewLoading = document.getElementById("review-loading");
 
     // Edit
     this.$editCount   = document.getElementById("edit-count");
@@ -675,6 +676,7 @@ class App {
   _renderReview() {
     this.$cardFlipper.classList.remove("flipped");
     this.$ratingArea.classList.add("hidden");
+    this.$reviewLoading.classList.add("hidden");
 
     if (!this._session.hasCards) {
       this.$cardScene.classList.add("hidden");
@@ -765,10 +767,20 @@ class App {
     }).join("");
   }
 
-  async _rateCard(success) {
+async _rateCard(success) {
     const ratedCard = this._session.recordRating(success);
+
+    this.$ratingArea.classList.add("hidden");
+    this.$cardScene.classList.add("hidden");
+    this.$reviewLoading.classList.remove("hidden");
+
     if (ratedCard) {
-      this._cardRepo.update(ratedCard).catch(err => console.error("Error persistiendo intervalo:", err));
+      try {
+        await this._cardRepo.update(ratedCard);
+      } catch (err) {
+        console.error("Error persistiendo intervalo:", err);
+        alert("No se pudo guardar el repaso. Comprueba tu conexión e inténtalo de nuevo.");
+      }
       // Si la tarjeta ha entrado en estado zombi (dominada), sale de la
       // sesión de repaso y de los contadores, pero permanece en Firestore
       // para seguir contando en la comprobación de duplicados al añadir.
@@ -777,19 +789,27 @@ class App {
         this._updateBadges();
       }
     }
-    this.$ratingArea.classList.add("hidden");
-    this.$cardScene.classList.add("hidden");
-    setTimeout(() => this._renderReview(), 150);
+
+    this._renderReview();
   }
 
   async _repeatCard() {
     const card = this._session.recordRepeat();
-    if (card) {
-      this._cardRepo.update(card).catch(err => console.error("Error persistiendo repetición:", err));
-    }
+
     this.$ratingArea.classList.add("hidden");
     this.$cardScene.classList.add("hidden");
-    setTimeout(() => this._renderReview(), 150);
+    this.$reviewLoading.classList.remove("hidden");
+
+    if (card) {
+      try {
+        await this._cardRepo.update(card);
+      } catch (err) {
+        console.error("Error persistiendo repetición:", err);
+        alert("No se pudo guardar el repaso. Comprueba tu conexión e inténtalo de nuevo.");
+      }
+    }
+
+    this._renderReview();
   }
 
   _bindSwipeGesture() {
