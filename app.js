@@ -178,6 +178,7 @@ class ReviewSession {
   get hasCards() { return this._cards.length > 0; }
 
   get currentCategory() { return this._currentCategory; }
+  get currentCard() { return this._current; }
 
   pick() {
     if (!this.hasCards) return null;
@@ -343,9 +344,15 @@ class App {
 
   // ─── Event listeners ──────────────────────────────────────────────────
   _bindEvents() {
-    this.$navBtns.forEach(btn => {
-      btn.addEventListener("click", () => this._navigateTo(btn.dataset.view));
-    });
+     this.$navBtns.forEach(btn => {
+       btn.addEventListener("click", () => {
+         if (btn.dataset.action === "edit-current") {
+           this._editCurrentReviewCard();
+           return;
+         }
+         this._navigateTo(btn.dataset.view);
+       });
+     });
 
     // Deck bar / modal
     this.$btnModalSave.addEventListener("click",   () => this._saveEdit());
@@ -886,6 +893,15 @@ class App {
   // ═══════════════════════════════════════════════════════════════════════
   //  MODAL: Edit / Delete card
   // ═══════════════════════════════════════════════════════════════════════
+  _editCurrentReviewCard() {
+    const card = this._session.currentCard;
+    if (!card) {
+      alert("No hay ninguna tarjeta visible en Repasar para editar.");
+      return;
+    }
+    this._openModal(card);
+  }
+
   _openModal(card) {
     this._editingCard     = card;
     this.$editFront.value = card.front;
@@ -915,6 +931,15 @@ class App {
       await this._cardRepo.update(this._editingCard);
       this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
+
+      // Si la tarjeta editada es la que se está mostrando en Repasar,
+      // sincroniza el texto visible sin relanzar _renderReview (evita
+      // que se voltee o se elija otra tarjeta de golpe).
+      if (this._session.currentCard && this._session.currentCard.id === this._editingCard.id) {
+        this.$cardFrontText.textContent = this._editingCard.front;
+        this.$cardBackText.textContent  = this._editingCard.back;
+      }
+
       this._closeModal();
       this._renderCardList();
     } catch (err) {
