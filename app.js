@@ -453,9 +453,11 @@ class App {
     }
   }
 
-    async _zombifyCard() {
+  async _zombifyCard() {
     if (!this._editingCard) return;
     if (!confirm(`¿Zombificar "${this._editingCard.front}"? Pasará a considerarse dominada: desaparecerá del repaso, la lista y el histograma, aunque seguirá en Firestore.`)) return;
+
+    const wasCurrentReviewCard = this._session.currentCard?.id === this._editingCard.id;
 
     this._editingCard.interval     = AUTO_DELETE_INTERVAL_MIN + 1;
     this._editingCard.lastReviewed = new Date();
@@ -466,6 +468,10 @@ class App {
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
+      // Si la tarjeta zombificada era la que se estaba repasando, la vista
+      // de Repasar (que sigue detrás del modal) quedaría mostrando una
+      // tarjeta ya zombi. Forzamos elegir una nueva.
+      if (wasCurrentReviewCard) this._renderReview();
     } catch (err) {
       this._showFeedback(this.$editFeedback, "Error al zombificar.", "error");
       console.error(err);
@@ -971,6 +977,8 @@ async _rateCard(success) {
   async _deleteCard() {
     if (!confirm(`¿Eliminar la tarjeta "${this._editingCard.front}"?`)) return;
 
+    const wasCurrentReviewCard = this._session.currentCard?.id === this._editingCard.id;
+
     try {
       await this._cardRepo.remove(this._editingCard.id);
       this._cards = this._cards.filter(c => c.id !== this._editingCard.id);
@@ -978,6 +986,9 @@ async _rateCard(success) {
       this._updateBadges();
       this._closeModal();
       this._renderCardList();
+      // La tarjeta eliminada ya no es válida como tarjeta en curso: si era
+      // la que se estaba repasando, hay que elegir otra.
+      if (wasCurrentReviewCard) this._renderReview();
     } catch (err) {
       this._showFeedback(this.$editFeedback, "Error al eliminar.", "error");
       console.error(err);
