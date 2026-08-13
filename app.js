@@ -386,9 +386,11 @@ class App {
 
     this.$progressPie.addEventListener("click", (e) => {
   e.stopPropagation(); // que no dispare el flip de la tarjeta
-  const card = this._session.currentCard;
-  if (card) this._openModal(card);
-});
+      const card = this._session.currentCard;
+      if (!card) return;
+      this._editingCard = card;   // _zombifyCard() opera sobre this._editingCard
+      this._zombifyCard();
+    });
 
     document.addEventListener("keydown", (e) => {
       const inReviewView = !this.$views.review.classList.contains("hidden");
