@@ -19,6 +19,7 @@ const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
 // valor (en minutos), se considera "dominada" y se borra automáticamente
 // al calcularse tras un repaso. 10 días = 10 * 24 * 60.
 const AUTO_DELETE_INTERVAL_MIN = 10 * 24 * 60;
+const TOTAL_SLICES = Math.ceil(Math.log2(AUTO_DELETE_INTERVAL_MIN / MIN_INTERVAL_MIN)); // 14
 
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
@@ -61,6 +62,14 @@ class Card {
   // No se persiste en Firestore: se deduce del intervalo en cada lectura.
   get zombie() {
     return this.interval > AUTO_DELETE_INTERVAL_MIN;
+  }
+
+  // Porciones del pastel de progreso: 0 = nueva, 1 = en el mínimo,
+  // TOTAL_SLICES = a punto de zombificarse.
+  get progressSlices() {
+    if (!this.lastReviewed) return 0;
+    const raw = 1 + Math.floor(Math.log2(this.interval / MIN_INTERVAL_MIN));
+    return Math.max(0, Math.min(TOTAL_SLICES, raw));
   }
 
   toFirestore() {
@@ -292,6 +301,7 @@ class App {
     // Review
     this.$reviewCount   = document.getElementById("review-count");
     this.$cardScene     = document.getElementById("card-scene");
+    this.$progressPie = document.getElementById("progress-pie");
     this.$cardFlipper   = document.getElementById("card-flipper");
     this.$cardFrontText = document.getElementById("card-front-text");
     this.$cardBackText  = document.getElementById("card-back-text");
@@ -373,6 +383,12 @@ class App {
     this.$cardScene.addEventListener("click", () => {
       if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
     });
+
+    this.$progressPie.addEventListener("click", (e) => {
+  e.stopPropagation(); // que no dispare el flip de la tarjeta
+  const card = this._session.currentCard;
+  if (card) this._openModal(card);
+});
 
     document.addEventListener("keydown", (e) => {
       const inReviewView = !this.$views.review.classList.contains("hidden");
@@ -688,6 +704,7 @@ class App {
       this.$cardScene.classList.add("hidden");
       this.$reviewWaiting.classList.add("hidden");
       this.$reviewEmpty.classList.remove("hidden");
+      this._renderProgressPie(null);
       return;
     }
 
@@ -697,12 +714,14 @@ class App {
     if (!card) {
       this.$cardScene.classList.add("hidden");
       this.$reviewWaiting.classList.remove("hidden");
+      this._renderProgressPie(null);
       return;
     }
 
     this.$reviewWaiting.classList.add("hidden");
     this.$cardFrontText.textContent = card.front;
     this.$cardBackText.textContent  = card.back;
+     this._renderProgressPie(card);
 
     // Colorea la tarjeta según la categoría que la ha originado
     this.$cardScene.classList.remove("card-ontime", "card-overdue", "card-new");
@@ -710,6 +729,32 @@ class App {
 
     this.$cardScene.classList.remove("hidden");
   }
+
+
+  _renderProgressPie(card) {
+    if (!card) { this.$progressPie.innerHTML = ""; return; }
+
+    const filled   = card.progressSlices;
+    const size     = 34, cx = size / 2, cy = size / 2, r = size / 2 - 2;
+    const gap      = 0.06; // radianes entre porciones
+    const anglePer = (Math.PI * 2) / TOTAL_SLICES;
+
+    let paths = "";
+    for (let i = 0; i < TOTAL_SLICES; i++) {
+      const a0 = -Math.PI / 2 + i * anglePer + gap / 2;
+      const a1 = -Math.PI / 2 + (i + 1) * anglePer - gap / 2;
+      const x1 = (cx + r * Math.cos(a0)).toFixed(2);
+      const y1 = (cy + r * Math.sin(a0)).toFixed(2);
+      const x2 = (cx + r * Math.cos(a1)).toFixed(2);
+      const y2 = (cy + r * Math.sin(a1)).toFixed(2);
+      const cls = i < filled ? "pie-slice filled" : "pie-slice";
+      paths += `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2} Z" class="${cls}"></path>`;
+  }
+
+    this.$progressPie.innerHTML = `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}">${paths}</svg>`;
+  }
+
+    
 
   _flipCard() {
     this.$cardFlipper.classList.add("flipped");

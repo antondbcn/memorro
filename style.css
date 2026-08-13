@@ -148,7 +148,27 @@ input { font-family: inherit; }
   margin-bottom: auto;
   cursor: pointer;
   touch-action: pan-y; /* permite scroll vertical pero deja libre el swipe horizontal */
+  position: relative; /* ancla el pastel */
 }
+
+.progress-pie-wrap {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  cursor: pointer;
+  transition: transform var(--transition);
+}
+
+.progress-pie-wrap:hover { transform: scale(1.15); }
+.progress-pie-wrap svg { display: block; }
+
+.pie-slice {
+  fill: rgba(255,255,255,0.10);
+  transition: fill var(--transition);
+}
+
+.pie-slice.filled { fill: var(--accent); }
 
 .card-flipper {
   position: relative;
