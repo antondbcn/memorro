@@ -19,7 +19,12 @@ const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
 // valor (en minutos), se considera "dominada" y se borra automáticamente
 // al calcularse tras un repaso. 10 días = 10 * 24 * 60.
 const AUTO_DELETE_INTERVAL_MIN = 10 * 24 * 60;
-const TOTAL_SLICES = Math.ceil(Math.log2(AUTO_DELETE_INTERVAL_MIN / MIN_INTERVAL_MIN)); // 14
+let TOTAL_SLICES = 0;
+let _interval = MIN_INTERVAL_MIN;
+while (_interval <= AUTO_DELETE_INTERVAL_MIN) {
+  _interval *= SUCCESS_MULTIPLIER;
+  TOTAL_SLICES++;
+}
 
 const firebaseConfig = {
   apiKey: "AIzaSyBPP1ZdTP6MU5aoLH4AUabX-Fh3JH1_xtA",
@@ -68,8 +73,16 @@ class Card {
   // TOTAL_SLICES = a punto de zombificarse.
   get progressSlices() {
     if (!this.lastReviewed) return 0;
-    const raw = 1 + Math.floor(Math.log2(this.interval / MIN_INTERVAL_MIN));
-    return Math.max(0, Math.min(TOTAL_SLICES, raw));
+
+    let clicksRemaining = 0;
+    let _interval = this.interval;
+    while (_interval <= AUTO_DELETE_INTERVAL_MIN) {
+      _interval *= SUCCESS_MULTIPLIER;
+      clicksRemaining++;
+    }
+
+    const filled = TOTAL_SLICES - clicksRemaining;
+    return Math.max(0, Math.min(TOTAL_SLICES, filled));
   }
 
   toFirestore() {
