@@ -14,6 +14,9 @@ const SUCCESS_MULTIPLIER   = 2;
 const FAILURE_MULTIPLIER   = 0.5;
 const DEFAULT_DECK_NAME    = "General";
 const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
+const EVAL_ACCEPT_THRESHOLD = 0.95;  // similitud mínima para "Aceptada"
+const EVAL_FAIL_THRESHOLD   = 0.70;  // por debajo de esto, "Equivocada"
+const LS_EVAL_MODE_PREFIX   = "flashcards.evalMode.";
 
 // Umbral de auto-eliminación: si el intervalo de una tarjeta supera este
 // valor (en minutos), se considera "dominada" y se borra automáticamente
@@ -34,6 +37,36 @@ const firebaseConfig = {
   messagingSenderId: "787070583852",
   appId: "1:787070583852:web:3c0d4e1347b4786ddc7d89"
 };
+
+// Distancia de Levenshtein estándar (programación dinámica, una fila).
+function levenshteinDistance(a, b) {
+  const m = a.length, n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  let prevRow = Array(n + 1);
+  for (let j = 0; j <= n; j++) prevRow[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    const currRow = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      currRow[j] = Math.min(
+        prevRow[j] + 1,       // borrado
+        currRow[j - 1] + 1,   // inserción
+        prevRow[j - 1] + cost // sustitución
+      );
+    }
+    prevRow = currRow;
+  }
+  return prevRow[n];
+}
+
+// Normalización acordada: solo trim + colapsar espacios múltiples.
+// NO toca mayúsculas, acentos, diéresis ni signos.
+function normalizeEvalText(str) {
+  return str.trim().replace(/\s+/g, " ");
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: Card
@@ -284,6 +317,7 @@ class App {
 
     this._session = new ReviewSession([]);
     this._editingCard = null;
+    this._evalEvaluated = false; // ¿ya se ha evaluado la tarjeta actual en modo auto?
     this._filterDebounceTimer = null;
 
     this._bindDOM();
@@ -322,6 +356,10 @@ class App {
     this.$reviewEmpty   = document.getElementById("review-empty");
     this.$reviewWaiting = document.getElementById("review-waiting");
     this.$reviewLoading = document.getElementById("review-loading");
+    this.$evalArea     = document.getElementById("eval-area");
+    this.$evalInputWrap = document.getElementById("eval-input-wrap");
+    this.$evalInput     = document.getElementById("eval-input");
+    this.$evalSubmit    = document.getElementById("eval-submit");
 
     // Edit
     this.$editCount   = document.getElementById("edit-count");
@@ -411,6 +449,15 @@ class App {
                          && this.$deckModalOverlay.classList.contains("hidden");
       if (!inReviewView || !modalsClosed) return;
 
+      const mode = this._getEvalMode(this._currentDeck);
+      if (mode === "auto" && !this.$evalArea.classList.contains("hidden") || this._evalEvaluated) {
+        if (e.code === "ArrowRight") {
+          e.preventDefault();
+          this._advanceEvalReview();
+          return;
+        }
+      }
+
       const flipped = this.$cardFlipper.classList.contains("flipped");
 
       if (!flipped && (e.code === "Space" || e.code === "Enter" || e.code === "ArrowDown")) {
@@ -431,6 +478,16 @@ class App {
         if (btn.dataset.rating === "repeat") this._repeatCard();
         else this._rateCard(btn.dataset.rating === "success");
       });
+    });
+
+    //Listeners de evaluación
+    this.$evalSubmit.addEventListener("click", () => this._evaluateInput());
+
+    this.$evalInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this._evaluateInput();
+      }
     });
 
     this._bindSwipeGesture();
@@ -527,6 +584,15 @@ class App {
     return `${front.trim().toLowerCase()}|||${back.trim().toLowerCase()}`;
   }
 
+  _getEvalMode(deckName) {
+    const stored = localStorage.getItem(LS_EVAL_MODE_PREFIX + deckName);
+    return stored === "self" ? "self" : "auto"; // default: auto
+  }
+
+  _setEvalMode(deckName, mode) {
+    localStorage.setItem(LS_EVAL_MODE_PREFIX + deckName, mode);
+  }
+
   // ─── Navegación ───────────────────────────────────────────────────────
   _navigateTo(viewName) {
     this.$navBtns.forEach(btn => {
@@ -577,18 +643,37 @@ class App {
     this._decks.forEach(deck => {
       const count       = this._cards.filter(c => c.deck === deck.name).length;
       const zombieCount = this._cards.filter(c => c.deck === deck.name && c.zombie).length;
+      const evalMode    = this._getEvalMode(deck.name);
+      const isAuto      = evalMode === "auto";
 
       const item = document.createElement("div");
       item.className = "deck-list-item" + (deck.name === this._currentDeck ? " active" : "");
       item.innerHTML = `
         <span class="deck-list-item-name">${this._esc(deck.name)}</span>
         <span class="deck-list-item-count">${count}</span>
+        <label class="toggle-wrap deck-eval-toggle" title="Autoevaluación">
+          <input type="checkbox" class="deck-eval-checkbox" ${isAuto ? "checked" : ""} />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
         <button class="deck-resurrect-btn" title="Resucitar zombis (${zombieCount})" ${zombieCount === 0 ? "disabled" : ""}>♻️</button>
         <button class="deck-delete-btn" title="Eliminar baraja">✕</button>
       `;
 
       item.querySelector(".deck-list-item-name").addEventListener("click", () => this._selectDeck(deck.name));
       item.querySelector(".deck-list-item-count").addEventListener("click", () => this._selectDeck(deck.name));
+
+      item.querySelector(".deck-eval-checkbox").addEventListener("click", (e) => {
+        e.stopPropagation();
+      });
+      item.querySelector(".deck-eval-checkbox").addEventListener("change", (e) => {
+        this._setEvalMode(deck.name, e.target.checked ? "auto" : "self");
+        if (deck.name === this._currentDeck) {
+          // si estamos viendo Repasar ahora mismo, refresca para aplicar el nuevo modo
+          const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
+          if (activeViewName === "review") this._renderReview();
+        }
+      });
+
       item.querySelector(".deck-resurrect-btn").addEventListener("click", (e) => {
         e.stopPropagation();
         this._resurrectZombies(deck);
@@ -743,10 +828,79 @@ class App {
     this.$cardScene.classList.add(`card-${this._session.currentCategory}`);
 
     this.$cardScene.classList.remove("hidden");
+
+    const mode = this._getEvalMode(this._currentDeck);
+    this._evalEvaluated = false;
+
+    if (mode === "auto") {
+      this.$ratingArea.classList.add("hidden");
+      this._renderEvalArea(card);
+    } else {
+      this.$evalArea.classList.add("hidden");
+      // el flujo de flip + rating-area sigue exactamente igual que hasta ahora
+    }
   }
 
+  _renderEvalArea(card) {
+    this.$cardFrontText.textContent = card.front; // se ve la pregunta
+    this.$evalInput.value = "";
+    this.$evalInput.disabled = false;
+    this.$evalSubmit.classList.remove("hidden");
+    this.$evalInputWrap.classList.remove("eval-correct", "eval-partial", "eval-wrong");
+    this.$evalArea.classList.remove("hidden");
+    this.$evalInput.focus();
+  }
 
-  _renderProgressPie(card) {
+  _evaluateInput() {
+    const card = this._session.currentCard;
+    if (!card) return;
+
+    const typed = normalizeEvalText(this.$evalInput.value);
+    if (!typed) return; // input vacío: no hace nada, según lo acordado
+
+    const expected = normalizeEvalText(card.back);
+    const distance = levenshteinDistance(typed, expected);
+    const similarity = expected.length === 0 ? 1 : 1 - (distance / expected.length);
+
+    let resultClass, resultKind;
+    if (similarity >= EVAL_ACCEPT_THRESHOLD) {
+      resultClass = "eval-correct"; resultKind = "success";
+    } else if (similarity < EVAL_FAIL_THRESHOLD) {
+      resultClass = "eval-wrong"; resultKind = "fail";
+    } else {
+      resultClass = "eval-partial"; resultKind = "repeat";
+    }
+
+    // Feedback visual: arriba se muestra la solución, abajo lo escrito
+    this.$cardFrontText.textContent = card.back;
+    this.$evalInputWrap.classList.add(resultClass);
+    this.$evalInput.disabled = true;
+    this.$evalSubmit.classList.add("hidden");
+
+    this._evalEvaluated = true;
+    this._evalPendingResult = resultKind; // se persiste al avanzar
+  }
+
+  async _advanceEvalReview() {
+    if (this._evalEvaluated && this._evalPendingResult) {
+      this.$evalArea.classList.add("hidden");
+      this.$cardScene.classList.add("hidden");
+      this.$reviewLoading.classList.remove("hidden");
+
+      if (this._evalPendingResult === "repeat") {
+        await this._repeatCard();
+      } else {
+        await this._rateCard(this._evalPendingResult === "success");
+      }
+      // _rateCard/_repeatCard ya llaman a _renderReview() al final
+    } else {
+      // no evaluado: se pasa de tarjeta sin tocarla
+      this._renderReview();
+    }
+    this._evalPendingResult = null;
+  }
+
+_renderProgressPie(card) {
     if (!card) { this.$progressPie.innerHTML = ""; return; }
 
     const filled   = card.progressSlices;
@@ -934,7 +1088,12 @@ async _rateCard(success) {
       if (verticalDominant && -dy > VSWIPE_THRESHOLD) {
         this._repeatCard();
       } else if (!verticalDominant && Math.abs(dx) > SWIPE_THRESHOLD) {
-        this._rateCard(dx > 0);
+          const mode = this._getEvalMode(this._currentDeck);
+          if (mode === "auto") {
+            if (dx > 0) this._advanceEvalReview(); // solo derecha avanza en modo auto
+          } else {
+            this._rateCard(dx > 0);
+          }
       }
     };
 
