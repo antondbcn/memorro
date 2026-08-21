@@ -496,7 +496,7 @@ class App {
       if (this._evalEvaluated) this._advanceEvalReview();
       else this._evaluateInput();
     });
-    
+
     this.$evalInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -861,7 +861,7 @@ class App {
     this.$evalInputWrap.classList.remove("eval-correct", "eval-partial", "eval-wrong");
 
     this.$evalSubmit.textContent = "✓";
-    this.$evalSubmit.classList.remove("eval-submit-next");
+    this.$evalSubmit.classList.remove("eval-submit-next", "eval-correct", "eval-partial", "eval-wrong");
     this.$evalSubmit.setAttribute("aria-label", "Evaluar");
     this.$evalSubmit.classList.remove("hidden");
 
@@ -892,6 +892,7 @@ class App {
     // Feedback visual: arriba se muestra la solución, abajo lo escrito
     this.$cardFrontText.textContent = card.back;
     this.$evalInputWrap.classList.add(resultClass);
+    this.$evalSubmit.classList.add("eval-submit-next", resultClass);
     this.$evalInput.disabled = true;
 
     this.$evalSubmit.textContent = "→";

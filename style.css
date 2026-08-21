@@ -338,7 +338,7 @@ input { font-family: inherit; }
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--info);
   color: #fff;
   font-size: 1rem;
   font-weight: 700;
@@ -348,13 +348,18 @@ input { font-family: inherit; }
   transition: background var(--transition), transform var(--transition);
 }
 
-.eval-submit-btn:hover  { background: var(--accent-dim); }
+.eval-submit-btn:hover  { filter: brightness(1.1); }
 .eval-submit-btn:active { transform: translateY(-50%) scale(0.92); }
 
 .eval-submit-btn.eval-submit-next {
-  background: var(--success);
+  font-size: 1.3rem; /* flecha más grande que el tick */
 }
-.eval-submit-btn.eval-submit-next:hover { background: #3d9b6c; }
+
+.eval-submit-btn.eval-submit-next.eval-correct { background: var(--success); }
+.eval-submit-btn.eval-submit-next.eval-partial { background: var(--warning); }
+.eval-submit-btn.eval-submit-next.eval-wrong   { background: var(--accent); }
+
+.eval-submit-btn.eval-submit-next:hover { filter: brightness(1.1); }
 
 .eval-input-wrap.eval-correct {
   border-color: rgba(76,175,130,0.7);
