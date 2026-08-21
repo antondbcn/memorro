@@ -432,6 +432,8 @@ class App {
 
     // Review: voltear
     this.$cardScene.addEventListener("click", () => {
+      const mode = this._getEvalMode(this._currentDeck);
+      if (mode === "auto") return; // en modo auto no hay volteo por tap
       if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
     });
 
@@ -446,18 +448,26 @@ class App {
     document.addEventListener("keydown", (e) => {
       const inReviewView = !this.$views.review.classList.contains("hidden");
       const modalsClosed = this.$modalOverlay.classList.contains("hidden")
-                         && this.$deckModalOverlay.classList.contains("hidden");
+                        && this.$deckModalOverlay.classList.contains("hidden");
       if (!inReviewView || !modalsClosed) return;
 
+      // NUEVO: si el foco está en un campo de texto, no interpretar teclas como atajos de repaso
+      const typingInField = document.activeElement === this.$evalInput
+                          || document.activeElement === this.$searchInput
+                          || document.activeElement === this.$deckNewName;
+
       const mode = this._getEvalMode(this._currentDeck);
-      if (mode === "auto" && !this.$evalArea.classList.contains("hidden") || this._evalEvaluated) {
-        if (e.code === "ArrowRight") {
+
+      if (mode === "auto") {
+        if (typingInField) return; // deja que Space/Enter funcionen con normalidad en el input
+        if (this._evalEvaluated && e.code === "ArrowRight") {
           e.preventDefault();
           this._advanceEvalReview();
-          return;
         }
+        return; // en modo auto, nada de flip/rating-area por teclado
       }
 
+      // ─── a partir de aquí, comportamiento exactamente igual que hasta ahora (modo self) ───
       const flipped = this.$cardFlipper.classList.contains("flipped");
 
       if (!flipped && (e.code === "Space" || e.code === "Enter" || e.code === "ArrowDown")) {
@@ -472,6 +482,7 @@ class App {
         if (e.code === "ArrowUp")    { e.preventDefault(); this._repeatCard(); }
       }
     });
+
 
     document.querySelectorAll(".btn-rating").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -651,8 +662,7 @@ class App {
       item.innerHTML = `
         <span class="deck-list-item-name">${this._esc(deck.name)}</span>
         <span class="deck-list-item-count">${count}</span>
-        <label class="toggle-wrap deck-eval-toggle" title="Autoevaluación">
-          <input type="checkbox" class="deck-eval-checkbox" ${isAuto ? "checked" : ""} />
+        <label class="toggle-wrap deck-eval-toggle" title="Evaluación automática">          <input type="checkbox" class="deck-eval-checkbox" ${isAuto ? "checked" : ""} />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
         <button class="deck-resurrect-btn" title="Resucitar zombis (${zombieCount})" ${zombieCount === 0 ? "disabled" : ""}>♻️</button>
