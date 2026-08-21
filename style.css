@@ -351,6 +351,11 @@ input { font-family: inherit; }
 .eval-submit-btn:hover  { background: var(--accent-dim); }
 .eval-submit-btn:active { transform: translateY(-50%) scale(0.92); }
 
+.eval-submit-btn.eval-submit-next {
+  background: var(--success);
+}
+.eval-submit-btn.eval-submit-next:hover { background: #3d9b6c; }
+
 .eval-input-wrap.eval-correct {
   border-color: rgba(76,175,130,0.7);
   box-shadow: 0 0 0 3px rgba(76,175,130,0.3);

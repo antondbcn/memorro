@@ -492,8 +492,11 @@ class App {
     });
 
     //Listeners de evaluación
-    this.$evalSubmit.addEventListener("click", () => this._evaluateInput());
-
+    this.$evalSubmit.addEventListener("click", () => {
+      if (this._evalEvaluated) this._advanceEvalReview();
+      else this._evaluateInput();
+    });
+    
     this.$evalInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -852,11 +855,16 @@ class App {
   }
 
   _renderEvalArea(card) {
-    this.$cardFrontText.textContent = card.front; // se ve la pregunta
+    this.$cardFrontText.textContent = card.front;
     this.$evalInput.value = "";
     this.$evalInput.disabled = false;
-    this.$evalSubmit.classList.remove("hidden");
     this.$evalInputWrap.classList.remove("eval-correct", "eval-partial", "eval-wrong");
+
+    this.$evalSubmit.textContent = "✓";
+    this.$evalSubmit.classList.remove("eval-submit-next");
+    this.$evalSubmit.setAttribute("aria-label", "Evaluar");
+    this.$evalSubmit.classList.remove("hidden");
+
     this.$evalArea.classList.remove("hidden");
     this.$evalInput.focus();
   }
@@ -885,10 +893,13 @@ class App {
     this.$cardFrontText.textContent = card.back;
     this.$evalInputWrap.classList.add(resultClass);
     this.$evalInput.disabled = true;
-    this.$evalSubmit.classList.add("hidden");
+
+    this.$evalSubmit.textContent = "→";
+    this.$evalSubmit.classList.add("eval-submit-next");
+    this.$evalSubmit.setAttribute("aria-label", "Siguiente tarjeta");
 
     this._evalEvaluated = true;
-    this._evalPendingResult = resultKind; // se persiste al avanzar
+    this._evalPendingResult = resultKind;
   }
 
   async _advanceEvalReview() {
