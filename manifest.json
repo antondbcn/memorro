@@ -1,0 +1,13 @@
+{
+  "name": "Memorro",
+  "short_name": "Memo",
+  "icons": [
+    {
+      "src": "/iconoMemorro 512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "/",
+  "display": "standalone"
+}
