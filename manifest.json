@@ -3,11 +3,16 @@
   "short_name": "Memo",
   "icons": [
     {
-      "src": "/iconoMemorro 512x512.png",
+      "src": "./iconoMemorro192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./iconoMemorro512.png",
       "sizes": "512x512",
       "type": "image/png"
     }
   ],
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone"
 }
