@@ -9,8 +9,8 @@ import { getAuth, signInAnonymously, onAuthStateChanged }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
 const INITIAL_INTERVAL_MIN = 720;
-const MIN_INTERVAL_MIN     = 1;
-const SUCCESS_MULTIPLIER   = 2;
+const MIN_INTERVAL_MIN     = 2;
+const SUCCESS_MULTIPLIER   = 1.8;
 const FAILURE_MULTIPLIER   = 0.5;
 const DEFAULT_DECK_NAME    = "General";
 const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
@@ -709,7 +709,7 @@ class App {
 
     try {
       for (const card of zombies) {
-        card.interval     = 3; // mismo valor que un fallo en primera revisión
+        card.interval     = Math.max(MIN_INTERVAL_MIN, card.interval * FAILURE_MULTIPLIER); // Como si hubiese fallado en un repaso
         card.lastReviewed = new Date();
         await this._cardRepo.update(card);
       }
