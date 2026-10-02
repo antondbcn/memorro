@@ -10,7 +10,7 @@ import { getAuth, signInAnonymously, onAuthStateChanged }
 
 const INITIAL_INTERVAL_MIN = 720;
 const MIN_INTERVAL_MIN     = 2;
-const SUCCESS_MULTIPLIER   = 1.8;
+const SUCCESS_MULTIPLIER   = 1.6;
 const FAILURE_MULTIPLIER   = 0.5;
 const DEFAULT_DECK_NAME    = "General";
 const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
@@ -21,7 +21,7 @@ const LS_EVAL_MODE_PREFIX   = "flashcards.evalMode.";
 // Umbral de auto-eliminación: si el intervalo de una tarjeta supera este
 // valor (en minutos), se considera "dominada" y se borra automáticamente
 // al calcularse tras un repaso. 10 días = 10 * 24 * 60.
-const AUTO_DELETE_INTERVAL_MIN = 10 * 24 * 60;
+const AUTO_DELETE_INTERVAL_MIN = 30 * 24 * 60;
 let TOTAL_SLICES = 0;
 let _interval = MIN_INTERVAL_MIN;
 while (_interval <= AUTO_DELETE_INTERVAL_MIN) {
