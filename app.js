@@ -336,7 +336,7 @@ class App {
   constructor(cardRepo, deckRepo, userRepo) {
     this._cardRepo = cardRepo;
     this._deckRepo = deckRepo;
-    this._userRepo = deckRepo;
+    this._userRepo = userRepo;
 
     this._cards   = [];          // TODAS las tarjetas, de todas las barajas
     this._decks   = [];          // [{id, name}]
