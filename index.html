@@ -13,13 +13,17 @@
 
     <!-- ═══════════════════════════════ DECK BAR ═══════════════════════════════ -->
   <div class="deck-bar">
+    <button id="user-bar-btn" class="deck-bar-btn">
+      <span class="deck-bar-icon">👤</span>
+      <span id="user-bar-name">General</span>
+      <span class="deck-bar-caret">▾</span>
+    </button>
     <button id="deck-bar-btn" class="deck-bar-btn">
       <span class="deck-bar-icon">🗂️</span>
       <span id="deck-bar-name">Baraja</span>
       <span class="deck-bar-caret">▾</span>
     </button>
   </div>
-
     
   <!-- ═══════════════════════════════════════ VIEWS ═══════════════════════════════════════ -->
 
@@ -259,6 +263,34 @@
     </div>
   </div>
 
+<!-- ══════════════════════════════ MODAL: Users ══════════════════════════════ -->
+  <div id="user-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title">Usuarios</span>
+        <button id="btn-user-modal-close" class="btn-icon">✕</button>
+      </div>
+      <div id="user-list" class="deck-list"></div>
+      <div class="deck-add-row">
+        <input id="user-new-name" type="text" class="search-input" placeholder="Nuevo usuario…" autocomplete="off" />
+        <button id="btn-user-add" class="btn-icon deck-add-btn">＋</button>
+      </div>
+      <p id="user-feedback" class="form-feedback hidden"></p>
+    </div>
+  </div>
+
+<!-- MODAL: Usuarios de una baraja -->
+  <div id="deck-users-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="deck-users-title" class="modal-title">Usuarios</span>
+        <button id="btn-deck-users-close" class="btn-icon">✕</button>
+      </div>
+      <div id="deck-users-list" class="deck-list"></div>
+    </div>
+  </div>
+
+    
   <!-- Firebase SDK -->
   <script type="module" src="app.js"></script>
 </body>

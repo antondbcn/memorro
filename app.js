@@ -10,12 +10,14 @@ import { getAuth, signInAnonymously, onAuthStateChanged }
 
 const INITIAL_INTERVAL_MIN = 720;
 const MIN_INTERVAL_MIN     = 2;
-const SUCCESS_MULTIPLIER   = 1.6;
+const SUCCESS_MULTIPLIER   = 1.8;
 const FAILURE_MULTIPLIER   = 0.5;
 const DEFAULT_DECK_NAME    = "General";
 const LS_CURRENT_DECK_KEY  = "flashcards.currentDeck";
+const DEFAULT_USER_NAME   = "General";
+const LS_CURRENT_USER_KEY = "flashcards.currentUser";
 const EVAL_ACCEPT_THRESHOLD = 0.95;  // similitud mínima para "Aceptada"
-const EVAL_FAIL_THRESHOLD   = 0.70;  // por debajo de esto, "Equivocada"
+const EVAL_FAIL_THRESHOLD   = 0.75;  // por debajo de esto, "Equivocada"
 const LS_EVAL_MODE_PREFIX   = "flashcards.evalMode.";
 
 // Umbral de auto-eliminación: si el intervalo de una tarjeta supera este
@@ -197,12 +199,16 @@ class DeckRepository {
 
   async fetchAll() {
     const snap = await getDocs(this._col);
-    return snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+    return snap.docs.map(d => ({ id: d.id, name: d.data().name, userIds: d.data().userIds ?? [] }));
   }
 
-  async add(name) {
-    const ref = await addDoc(this._col, { name, createdAt: serverTimestamp() });
-    return { id: ref.id, name };
+  async add(name, userIds = []) {
+    const ref = await addDoc(this._col, { name, userIds, createdAt: serverTimestamp() });
+    return { id: ref.id, name, userIds };
+  }
+
+  async setUsers(deckId, userIds) {
+    await updateDoc(doc(this._db, this._col.path, deckId), { userIds });
   }
 
   async remove(deckId) {
@@ -211,6 +217,26 @@ class DeckRepository {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLASS: UserRepository
+// ═══════════════════════════════════════════════════════════════════════════
+class UserRepository {
+  constructor(db, collectionName = "users") {
+    this._db  = db;
+    this._col = collection(db, collectionName);
+  }
+  async fetchAll() {
+    const snap = await getDocs(this._col);
+    return snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+  }
+  async add(name) {
+    const ref = await addDoc(this._col, { name, createdAt: serverTimestamp() });
+    return { id: ref.id, name };
+  }
+  async remove(userId) {
+    await deleteDoc(doc(this._db, this._col.path, userId));
+  }
+}
 // ═══════════════════════════════════════════════════════════════════════════
 //  CLASS: ReviewSession
 //
@@ -307,13 +333,16 @@ class ReviewSession {
 //  CLASS: App
 // ═══════════════════════════════════════════════════════════════════════════
 class App {
-  constructor(cardRepo, deckRepo) {
+  constructor(cardRepo, deckRepo, userRepo) {
     this._cardRepo = cardRepo;
     this._deckRepo = deckRepo;
+    this._userRepo = deckRepo;
 
     this._cards   = [];          // TODAS las tarjetas, de todas las barajas
     this._decks   = [];          // [{id, name}]
+    this._users   = [];          // [{id, name}]
     this._currentDeck = null;    // nombre de la baraja activa
+    this._currentUser = null;    // nombre del usuario
 
     this._session = new ReviewSession([]);
     this._editingCard = null;
@@ -344,6 +373,24 @@ class App {
     this.$deckNewName   = document.getElementById("deck-new-name");
     this.$btnDeckAdd     = document.getElementById("btn-deck-add");
     this.$deckFeedback  = document.getElementById("deck-feedback");
+
+    // User bar
+    this.$userBarBtn        = document.getElementById("user-bar-btn");
+    this.$userBarName       = document.getElementById("user-bar-name");
+
+    // User modal
+    this.$userModalOverlay  = document.getElementById("user-modal-overlay");
+    this.$btnUserModalClose = document.getElementById("btn-user-modal-close");
+    this.$userList          = document.getElementById("user-list");
+    this.$userNewName       = document.getElementById("user-new-name");
+    this.$btnUserAdd        = document.getElementById("btn-user-add");
+    this.$userFeedback      = document.getElementById("user-feedback");
+
+    // Deck users modal
+    this.$deckUsersOverlay  = document.getElementById("deck-users-modal-overlay");
+    this.$btnDeckUsersClose = document.getElementById("btn-deck-users-close");
+    this.$deckUsersTitle    = document.getElementById("deck-users-title");
+    this.$deckUsersList     = document.getElementById("deck-users-list");
 
     // Review
     this.$reviewCount   = document.getElementById("review-count");
@@ -430,6 +477,21 @@ class App {
       if (e.key === "Enter") this._createDeck();
     });
 
+    // User bar / modal
+    this.$userBarBtn.addEventListener("click", () => this._openUserModal());
+    this.$btnUserModalClose.addEventListener("click", () => this._closeUserModal());
+    this.$userModalOverlay.addEventListener("click", (e) => {
+      if (e.target === this.$userModalOverlay) this._closeUserModal();
+    });
+    this.$btnUserAdd.addEventListener("click", () => this._createUser());
+    this.$userNewName.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this._createUser();
+    });
+    this.$btnDeckUsersClose.addEventListener("click", () => this._closeDeckUsersModal());
+    this.$deckUsersOverlay.addEventListener("click", (e) => {
+      if (e.target === this.$deckUsersOverlay) this._closeDeckUsersModal();
+    });
+
     // Review: voltear
     this.$cardScene.addEventListener("click", () => {
       const mode = this._getEvalMode(this._currentDeck);
@@ -448,13 +510,16 @@ class App {
     document.addEventListener("keydown", (e) => {
       const inReviewView = !this.$views.review.classList.contains("hidden");
       const modalsClosed = this.$modalOverlay.classList.contains("hidden")
-                        && this.$deckModalOverlay.classList.contains("hidden");
+                        && this.$deckModalOverlay.classList.contains("hidden")
+                        && this.$userModalOverlay.classList.contains("hidden")
+                        && this.$deckUsersOverlay.classList.contains("hidden");
       if (!inReviewView || !modalsClosed) return;
 
       // NUEVO: si el foco está en un campo de texto, no interpretar teclas como atajos de repaso
       const typingInField = document.activeElement === this.$evalInput
                           || document.activeElement === this.$searchInput
-                          || document.activeElement === this.$deckNewName;
+                          || document.activeElement === this.$deckNewName
+                          || document.activeElement === this.$userNewName;
 
       const mode = this._getEvalMode(this._currentDeck);
 
@@ -531,6 +596,16 @@ class App {
   // ─── Inicialización ───────────────────────────────────────────────────
   async init() {
     try {
+      // ── Usuarios (nuevo) ──
+      this._users = await this._userRepo.fetchAll();
+      if (!this._users.some(u => u.name === DEFAULT_USER_NAME)) {
+        this._users.push(await this._userRepo.add(DEFAULT_USER_NAME));
+      }
+      const storedUser = localStorage.getItem(LS_CURRENT_USER_KEY);
+      this._currentUser = this._users.some(u => u.name === storedUser) ? storedUser : DEFAULT_USER_NAME;
+    localStorage.setItem(LS_CURRENT_USER_KEY, this._currentUser);
+
+      // ── Barajas (modificado) ──
       this._decks = await this._deckRepo.fetchAll();
 
       if (this._decks.length === 0) {
@@ -538,14 +613,17 @@ class App {
         this._decks.push(deck);
       }
 
+      const visible    = this._visibleDecks();
       const storedDeck = localStorage.getItem(LS_CURRENT_DECK_KEY);
-      this._currentDeck = this._decks.some(d => d.name === storedDeck)
+      this._currentDeck = visible.some(d => d.name === storedDeck)
         ? storedDeck
-        : this._decks[0].name;
-      localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
+        : (visible[0]?.name ?? null);
+      if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
 
+      // ── Igual que antes ──
       this._cards = await this._cardRepo.fetchAll();
 
+      this._refreshUserBar();   // nueva
       this._refreshDeckBar();
       this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
@@ -607,6 +685,36 @@ class App {
     localStorage.setItem(LS_EVAL_MODE_PREFIX + deckName, mode);
   }
 
+
+  // ─── Usuarios: helpers ────────────────────────────────────────────────
+  _isGeneralUser()  { return this._currentUser === DEFAULT_USER_NAME; }
+  _currentUserId()  { return this._users.find(u => u.name === this._currentUser)?.id; }
+
+  _visibleDecks() {
+    if (this._isGeneralUser()) return this._decks;
+    const uid = this._currentUserId();
+    return this._decks.filter(d => d.userIds.includes(uid));
+  }
+
+  // Si la baraja activa deja de ser visible, cambia a otra. Devuelve true si cambió.
+  _ensureVisibleDeck() {
+    const visible = this._visibleDecks();
+    if (visible.some(d => d.name === this._currentDeck)) return false;
+    this._currentDeck = visible[0]?.name ?? null;
+    if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
+    return true;
+  }
+
+  _refreshAll() {
+    this._refreshDeckBar();
+    this._session.updateCards(this._activeCardsInCurrentDeck());
+    this._updateBadges();
+    const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
+    if (activeViewName === "review") this._renderReview();
+    if (activeViewName === "edit") this._renderCardList();
+    if (activeViewName === "histograma") this._renderHistogram();
+  }
+    
   // ─── Navegación ───────────────────────────────────────────────────────
   _navigateTo(viewName) {
     this.$navBtns.forEach(btn => {
@@ -633,6 +741,111 @@ class App {
     this.$histogramCount.textContent = label;
   }
 
+
+
+// ─── Usuarios: barra + modal ──────────────────────────────────────────
+  _refreshUserBar() {
+    this.$userBarName.textContent = this._currentUser ?? DEFAULT_USER_NAME;
+  }
+
+  _openUserModal() {
+    this._renderUserList();
+    this.$userNewName.value = "";
+    this.$userFeedback.classList.add("hidden");
+    this.$userModalOverlay.classList.remove("hidden");
+  }
+
+  _closeUserModal() {
+    this.$userModalOverlay.classList.add("hidden");
+  }
+
+  _renderUserList() {
+    this.$userList.innerHTML = "";
+    const sorted = [...this._users].sort((a, b) => {
+      if (a.name === DEFAULT_USER_NAME) return -1;
+      if (b.name === DEFAULT_USER_NAME) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    sorted.forEach(user => {
+      const isGeneral = user.name === DEFAULT_USER_NAME;
+      const count = isGeneral
+        ? this._decks.length
+        : this._decks.filter(d => d.userIds.includes(user.id)).length;
+
+      const item = document.createElement("div");
+      item.className = "deck-list-item" + (user.name === this._currentUser ? " active" : "");
+      item.innerHTML = `
+        <span class="deck-list-item-name">${this._esc(user.name)}</span>
+        <span class="deck-list-item-count">${count}</span>
+        ${isGeneral ? "" : `<button class="deck-delete-btn" title="Eliminar usuario">✕</button>`}
+      `;
+      item.querySelector(".deck-list-item-name").addEventListener("click", () => this._selectUser(user.name));
+      item.querySelector(".deck-list-item-count").addEventListener("click", () => this._selectUser(user.name));
+      item.querySelector(".deck-delete-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._deleteUser(user);
+      });
+      this.$userList.appendChild(item);
+    });
+  }
+
+  _selectUser(name) {
+    this._currentUser = name;
+    localStorage.setItem(LS_CURRENT_USER_KEY, name);
+    this._refreshUserBar();
+    this._ensureVisibleDeck();
+    this._closeUserModal();
+    this._refreshAll();
+  }
+
+  async _createUser() {
+    const name = this.$userNewName.value.trim();
+    if (!name) {
+      this._showFeedback(this.$userFeedback, "Escribe un nombre para el usuario.", "error");
+      return;
+    }
+    if (this._users.some(u => u.name.toLowerCase() === name.toLowerCase())) {
+      this._showFeedback(this.$userFeedback, "Ya existe un usuario con ese nombre.", "error");
+      return;
+    }
+    try {
+      const user = await this._userRepo.add(name);
+      this._users.push(user);
+      this.$userNewName.value = "";
+      this._renderUserList();
+    } catch (err) {
+      this._showFeedback(this.$userFeedback, "Error al crear el usuario.", "error");
+      console.error(err);
+    }
+  }
+
+  async _deleteUser(user) {
+    if (user.name === DEFAULT_USER_NAME) return;
+    if (!confirm(`¿Eliminar al usuario "${user.name}"? Sus barajas no se borran: seguirán disponibles en "${DEFAULT_USER_NAME}".`)) return;
+
+    try {
+      for (const deck of this._decks.filter(d => d.userIds.includes(user.id))) {
+        const ids = deck.userIds.filter(id => id !== user.id);
+        await this._deckRepo.setUsers(deck.id, ids);
+        deck.userIds = ids;
+      }
+      await this._userRepo.remove(user.id);
+      this._users = this._users.filter(u => u.id !== user.id);
+
+      if (this._currentUser === user.name) {
+        this._selectUser(DEFAULT_USER_NAME);
+        this._openUserModal();
+      } else {
+        this._renderUserList();
+      }
+    } catch (err) {
+      this._showFeedback(this.$userFeedback, "Error al eliminar el usuario.", "error");
+      console.error(err);
+    }
+  }
+
+    
   // ═══════════════════════════════════════════════════════════════════════
   //  DECK BAR + MODAL
   // ═══════════════════════════════════════════════════════════════════════
@@ -654,7 +867,7 @@ class App {
   _renderDeckList() {
     this.$deckList.innerHTML = "";
 
-    this._decks.forEach(deck => {
+    this._visibleDecks().forEach(deck => {
       const count       = this._cards.filter(c => c.deck === deck.name).length;
       const zombieCount = this._cards.filter(c => c.deck === deck.name && c.zombie).length;
       const evalMode    = this._getEvalMode(deck.name);
@@ -668,6 +881,7 @@ class App {
         <label class="toggle-wrap deck-eval-toggle" title="Evaluación automática">          <input type="checkbox" class="deck-eval-checkbox" ${isAuto ? "checked" : ""} />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
+        <button class="deck-users-btn" title="Asignar usuarios">👥</button>
         <button class="deck-resurrect-btn" title="Resucitar zombis (${zombieCount})" ${zombieCount === 0 ? "disabled" : ""}>♻️</button>
         <button class="deck-delete-btn" title="Eliminar baraja">✕</button>
       `;
@@ -677,6 +891,10 @@ class App {
 
       item.querySelector(".deck-eval-checkbox").addEventListener("click", (e) => {
         e.stopPropagation();
+      });
+      item.querySelector(".deck-users-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._openDeckUsersModal(deck);
       });
       item.querySelector(".deck-eval-checkbox").addEventListener("change", (e) => {
         this._setEvalMode(deck.name, e.target.checked ? "auto" : "self");
@@ -755,7 +973,7 @@ class App {
     }
 
     try {
-      const deck = await this._deckRepo.add(name);
+      const deck = await this._deckRepo.add(name, this._isGeneralUser() ? [] : [this._currentUserId()]);
       this._decks.push(deck);
       this.$deckNewName.value = "";
       this._renderDeckList();
@@ -791,11 +1009,10 @@ class App {
       this._decks = this._decks.filter(d => d.id !== deck.id);
 
       if (this._currentDeck === deck.name) {
-        this._currentDeck = this._decks[0].name;
-        localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
+        this._currentDeck = this._visibleDecks()[0]?.name ?? null;
+        if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
         this._refreshDeckBar();
       }
-
       this._session.updateCards(this._activeCardsInCurrentDeck());
       this._updateBadges();
       this._renderDeckList();
@@ -805,6 +1022,52 @@ class App {
     }
   }
 
+// ─── Asociar barajas a usuarios ───────────────────────────────────────
+  _openDeckUsersModal(deck) {
+    this.$deckUsersTitle.textContent = `Usuarios de "${deck.name}"`;
+    this.$deckUsersList.innerHTML = "";
+
+    const users = this._users.filter(u => u.name !== DEFAULT_USER_NAME);
+    if (users.length === 0) {
+      this.$deckUsersList.innerHTML = `<p class="deck-users-hint">Aún no hay usuarios. Créalos desde el selector de usuario.</p>`;
+    }
+
+    users.forEach(user => {
+      const row = document.createElement("label");
+      row.className = "deck-users-row";
+      row.innerHTML = `
+        <input type="checkbox" ${deck.userIds.includes(user.id) ? "checked" : ""} />
+      <span>${this._esc(user.name)}</span>
+      `;
+    row.querySelector("input").addEventListener("change", (e) =>
+        this._toggleDeckUser(deck, user, e.target.checked, e.target));
+      this.$deckUsersList.appendChild(row);
+    });
+
+    this.$deckUsersOverlay.classList.remove("hidden");
+}
+
+  async _toggleDeckUser(deck, user, checked, checkbox) {
+    const ids = checked
+      ? [...new Set([...deck.userIds, user.id])]
+      : deck.userIds.filter(id => id !== user.id);
+    try {
+      await this._deckRepo.setUsers(deck.id, ids);
+      deck.userIds = ids;
+    } catch (err) {
+      checkbox.checked = !checked;
+      alert("No se pudo guardar el cambio.");
+      console.error(err);
+    }
+  }
+
+  _closeDeckUsersModal() {
+    this.$deckUsersOverlay.classList.add("hidden");
+    // Si el usuario activo se quitó a sí mismo de la baraja actual:
+    if (this._ensureVisibleDeck()) this._refreshAll();
+    this._renderDeckList();
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   //  VIEW: REVIEW
   // ═══════════════════════════════════════════════════════════════════════
@@ -812,6 +1075,7 @@ class App {
     this.$cardFlipper.classList.remove("flipped");
     this.$ratingArea.classList.add("hidden");
     this.$reviewLoading.classList.add("hidden");
+    this.$evalArea.classList.add("hidden");
 
     if (!this._session.hasCards) {
       this.$cardScene.classList.add("hidden");
@@ -1249,6 +1513,11 @@ async _addCard() {
       return;
     }
 
+    if (!this._currentDeck) {
+      this._showFeedback(this.$addFeedback, "Crea o asigna una baraja antes de añadir tarjetas.", "error");
+      return;
+    }
+
     this._setButtonLoading(this.$btnAddSave, true);
     try {
       const candidates = [{ front, back }];
@@ -1338,6 +1607,11 @@ async _addCard() {
       return;
     }
 
+    if (!this._currentDeck) {
+      this._showFeedback(this.$addBatchFeedback, "Crea o asigna una baraja antes de añadir tarjetas.", "error");
+      return;
+    }
+
     this._setButtonLoading(this.$btnAddBatchSave, true);
     try {
       const existingKeys = new Set(
@@ -1415,7 +1689,8 @@ const db          = getFirestore(firebaseApp);
 const auth        = getAuth(firebaseApp);
 const cardRepo    = new CardRepository(db);
 const deckRepo    = new DeckRepository(db);
-const app         = new App(cardRepo, deckRepo);
+const userRepo    = new UserRepository(db);
+const app         = new App(cardRepo, deckRepo, userRepo);
 
 onAuthStateChanged(auth, (user) => {
   if (user) app.init();

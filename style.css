@@ -864,6 +864,7 @@ input { font-family: inherit; }
   align-items: center;
   padding: 0 20px;
   z-index: 60;
+  gap: 8px;
 }
 
 .deck-bar-btn {
@@ -877,10 +878,19 @@ input { font-family: inherit; }
   border-radius: var(--radius-md);
   background: var(--surface-alt);
   transition: background var(--transition);
+  min-width: 0;
 }
 
 .deck-bar-btn:hover { background: rgba(233,69,96,0.15); }
 .deck-bar-caret { color: var(--text-muted); font-size: 0.75rem; }
+
+#user-bar-name, #deck-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 28vw;
+}
+
 .deck-eval-toggle {
   flex-shrink: 0;
   transform: scale(0.8);
@@ -949,6 +959,36 @@ input { font-family: inherit; }
 }
 
 .deck-delete-btn:hover { background: rgba(233,69,96,0.2); color: var(--accent); }
+
+.deck-users-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.deck-users-btn:hover { background: rgba(76,140,220,0.25); }
+
+.deck-users-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface-alt);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.deck-users-row input { accent-color: var(--accent); width: 18px; height: 18px; }
+
+.deck-users-hint { color: var(--text-muted); font-size: 0.85rem; text-align: center; }
 
 .deck-add-row {
   display: flex;
