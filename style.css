@@ -314,13 +314,18 @@ input { font-family: inherit; }
 }
 
 .eval-input {
+  display: block;
   width: 100%;
   background: transparent;
   border: none;
   outline: none;
+  resize: none;
+  overflow-y: auto;
   color: var(--text);
+  font-family: inherit;
   font-size: 1.05rem;
   font-weight: 500;
+  line-height: 1.4;
 }
 
 .eval-input::placeholder { color: var(--text-muted); }
@@ -332,9 +337,8 @@ input { font-family: inherit; }
 
 .eval-submit-btn {
   position: absolute;
-  top: 50%;
+  bottom: 10px;
   right: 10px;
-  transform: translateY(-50%);
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -349,7 +353,7 @@ input { font-family: inherit; }
 }
 
 .eval-submit-btn:hover  { filter: brightness(1.1); }
-.eval-submit-btn:active { transform: translateY(-50%) scale(0.92); }
+.eval-submit-btn:active { transform: scale(0.92); }
 
 .eval-submit-btn.eval-submit-next {
   font-size: 1.3rem; /* flecha más grande que el tick */
@@ -1009,3 +1013,21 @@ input { font-family: inherit; }
 }
 
 .deck-add-btn:hover { background: var(--accent-dim); }
+
+.card-deck-tag {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 3;
+  max-width: 55%;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}

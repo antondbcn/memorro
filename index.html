@@ -57,6 +57,7 @@
       <!-- Card flip container -->
       <div id="card-scene" class="card-scene hidden">
         <div id="progress-pie" class="progress-pie-wrap" title="Progreso hacia dominada"></div>
+        <span id="card-deck-tag" class="card-deck-tag hidden"></span>
         <div id="card-flipper" class="card-flipper">
           <div class="card-face card-front">
             <p id="card-front-text"></p>
@@ -79,10 +80,11 @@
       <!-- Autoevaluación: caja de texto + tick -->
       <div id="eval-area" class="eval-area hidden">
         <div id="eval-input-wrap" class="eval-input-wrap">
-          <input id="eval-input" type="text" class="eval-input"
-                placeholder="Escribe tu respuesta…"
-                autocomplete="off" autocapitalize="off"
-                autocorrect="off" spellcheck="false" />
+          <textarea id="eval-input" class="eval-input" rows="2"
+            placeholder="Escribe tu respuesta…"
+            autocomplete="off" autocapitalize="off"
+            autocorrect="off" spellcheck="false">
+          </textarea>
           <button id="eval-submit" class="eval-submit-btn" aria-label="Evaluar">✓</button>
         </div>
       </div>

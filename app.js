@@ -20,6 +20,12 @@ const EVAL_ACCEPT_THRESHOLD = 0.95;  // similitud mínima para "Aceptada"
 const EVAL_FAIL_THRESHOLD   = 0.75;  // por debajo de esto, "Equivocada"
 const LS_EVAL_MODE_PREFIX   = "flashcards.evalMode.";
 
+// Baraja virtual "Todas": agrupa las tarjetas de todas las barajas visibles
+// del usuario. No existe en Firestore. Se identifica internamente con una
+// clave que no puede colisionar con el nombre de una baraja real.
+const ALL_DECK_KEY   = "__all__";
+const ALL_DECK_LABEL = "Todas";
+
 // Umbral de auto-eliminación: si el intervalo de una tarjeta supera este
 // valor (en minutos), se considera "dominada" y se borra automáticamente
 // al calcularse tras un repaso. 10 días = 10 * 24 * 60.
@@ -341,7 +347,7 @@ class App {
     this._cards   = [];          // TODAS las tarjetas, de todas las barajas
     this._decks   = [];          // [{id, name}]
     this._users   = [];          // [{id, name}]
-    this._currentDeck = null;    // nombre de la baraja activa
+    this._currentDeck = null;    // nombre de la baraja activa (o ALL_DECK_KEY)
     this._currentUser = null;    // nombre del usuario
 
     this._session = new ReviewSession([]);
@@ -396,6 +402,7 @@ class App {
     this.$reviewCount   = document.getElementById("review-count");
     this.$cardScene     = document.getElementById("card-scene");
     this.$progressPie = document.getElementById("progress-pie");
+    this.$cardDeckTag   = document.getElementById("card-deck-tag");
     this.$cardFlipper   = document.getElementById("card-flipper");
     this.$cardFrontText = document.getElementById("card-front-text");
     this.$cardBackText  = document.getElementById("card-back-text");
@@ -449,6 +456,7 @@ class App {
 
     // Nav
     this.$navBtns = document.querySelectorAll(".nav-btn");
+    this.$navAddBtn = document.querySelector('.nav-btn[data-view="add"]');
   }
 
   // ─── Event listeners ──────────────────────────────────────────────────
@@ -494,7 +502,7 @@ class App {
 
     // Review: voltear
     this.$cardScene.addEventListener("click", () => {
-      const mode = this._getEvalMode(this._currentDeck);
+      const mode = this._currentEvalMode();
       if (mode === "auto") return; // en modo auto no hay volteo por tap
       if (!this.$cardFlipper.classList.contains("flipped")) this._flipCard();
     });
@@ -521,7 +529,7 @@ class App {
                           || document.activeElement === this.$deckNewName
                           || document.activeElement === this.$userNewName;
 
-      const mode = this._getEvalMode(this._currentDeck);
+      const mode = this._currentEvalMode();
 
       if (mode === "auto") {
         if (typingInField) return; // deja que Space/Enter funcionen con normalidad en el input
@@ -562,8 +570,9 @@ class App {
       else this._evaluateInput();
     });
 
+    // El cajetín es ahora un <textarea>: Enter evalúa; Shift+Enter inserta salto de línea.
     this.$evalInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this._evaluateInput();
       }
@@ -614,8 +623,9 @@ class App {
       }
 
       const visible    = this._visibleDecks();
+      const selectable = this._selectableDecks();
       const storedDeck = localStorage.getItem(LS_CURRENT_DECK_KEY);
-      this._currentDeck = visible.some(d => d.name === storedDeck)
+      this._currentDeck = selectable.some(d => d.name === storedDeck)
         ? storedDeck
         : (visible[0]?.name ?? null);
       if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
@@ -659,9 +669,19 @@ class App {
   }
 
   // ─── Helpers: tarjetas de la baraja activa ────────────────────────────
+  _isAllDeck() { return this._currentDeck === ALL_DECK_KEY; }
+
+  // Tarjetas de todas las barajas visibles del usuario (incluye zombis).
+  _cardsInAllVisibleDecks() {
+    const names = new Set(this._visibleDecks().map(d => d.name));
+    return this._cards.filter(c => names.has(c.deck));
+  }
+
   // Todas las tarjetas de la baraja, incluidas las zombis. Se usa
   // únicamente para la comprobación de duplicados al añadir tarjetas.
+  // En la baraja virtual "Todas" devuelve las de todas las barajas visibles.
   _cardsInCurrentDeck() {
+    if (this._isAllDeck()) return this._cardsInAllVisibleDecks();
     return this._cards.filter(c => c.deck === this._currentDeck);
   }
 
@@ -685,21 +705,43 @@ class App {
     localStorage.setItem(LS_EVAL_MODE_PREFIX + deckName, mode);
   }
 
+  // Modo de evaluación efectivo: en la baraja virtual "Todas" se usa el modo
+  // de la baraja de origen de la tarjeta que se está repasando.
+  _currentEvalMode() {
+    const card = this._session.currentCard;
+    const deckName = (this._isAllDeck() && card) ? card.deck : this._currentDeck;
+    return this._getEvalMode(deckName);
+  }
+
 
   // ─── Usuarios: helpers ────────────────────────────────────────────────
   _isGeneralUser()  { return this._currentUser === DEFAULT_USER_NAME; }
   _currentUserId()  { return this._users.find(u => u.name === this._currentUser)?.id; }
 
+  // Barajas reales visibles para el usuario actual.
   _visibleDecks() {
     if (this._isGeneralUser()) return this._decks;
     const uid = this._currentUserId();
     return this._decks.filter(d => d.userIds.includes(uid));
   }
 
-  // Si la baraja activa deja de ser visible, cambia a otra. Devuelve true si cambió.
+  // "Todas" solo existe para usuarios distintos de General con 2+ barajas.
+  _hasAllDeck() {
+    return !this._isGeneralUser() && this._visibleDecks().length >= 2;
+  }
+
+  // Barajas seleccionables: la virtual "Todas" (si procede) + las reales.
+  _selectableDecks() {
+    const real = this._visibleDecks();
+    if (!this._hasAllDeck()) return real;
+    return [{ id: ALL_DECK_KEY, name: ALL_DECK_KEY, userIds: [], virtual: true }, ...real];
+  }
+
+  // Si la baraja activa deja de ser válida, cambia a otra. Devuelve true si cambió.
   _ensureVisibleDeck() {
+    if (this._isAllDeck() && this._hasAllDeck()) return false;
     const visible = this._visibleDecks();
-    if (visible.some(d => d.name === this._currentDeck)) return false;
+    if (!this._isAllDeck() && visible.some(d => d.name === this._currentDeck)) return false;
     this._currentDeck = visible[0]?.name ?? null;
     if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
     return true;
@@ -710,6 +752,7 @@ class App {
     this._session.updateCards(this._activeCardsInCurrentDeck());
     this._updateBadges();
     const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
+    if (activeViewName === "add" && this._isAllDeck()) { this._navigateTo("review"); return; }
     if (activeViewName === "review") this._renderReview();
     if (activeViewName === "edit") this._renderCardList();
     if (activeViewName === "histograma") this._renderHistogram();
@@ -717,6 +760,9 @@ class App {
     
   // ─── Navegación ───────────────────────────────────────────────────────
   _navigateTo(viewName) {
+    // En la baraja virtual no se pueden añadir tarjetas.
+    if (viewName === "add" && this._isAllDeck()) return;
+
     this.$navBtns.forEach(btn => {
       btn.classList.toggle("active", btn.dataset.view === viewName);
     });
@@ -850,7 +896,11 @@ class App {
   //  DECK BAR + MODAL
   // ═══════════════════════════════════════════════════════════════════════
   _refreshDeckBar() {
-    this.$deckBarName.textContent = this._currentDeck ?? "Baraja";
+    this.$deckBarName.textContent = this._isAllDeck()
+      ? ALL_DECK_LABEL
+      : (this._currentDeck ?? "Baraja");
+    // En la baraja virtual no se puede añadir: se oculta el botón "Añadir".
+    this.$navAddBtn.classList.toggle("hidden", this._isAllDeck());
   }
 
   _openDeckModal() {
@@ -867,7 +917,22 @@ class App {
   _renderDeckList() {
     this.$deckList.innerHTML = "";
 
-    this._visibleDecks().forEach(deck => {
+    this._selectableDecks().forEach(deck => {
+      // Baraja virtual: solo nombre y contador, sin controles.
+      if (deck.virtual) {
+        const total = this._cardsInAllVisibleDecks().length;
+        const item = document.createElement("div");
+        item.className = "deck-list-item" + (this._isAllDeck() ? " active" : "");
+        item.innerHTML = `
+          <span class="deck-list-item-name">${this._esc(ALL_DECK_LABEL)}</span>
+          <span class="deck-list-item-count">${total}</span>
+        `;
+        item.querySelector(".deck-list-item-name").addEventListener("click", () => this._selectDeck(deck.name));
+        item.querySelector(".deck-list-item-count").addEventListener("click", () => this._selectDeck(deck.name));
+        this.$deckList.appendChild(item);
+        return;
+      }
+
       const count       = this._cards.filter(c => c.deck === deck.name).length;
       const zombieCount = this._cards.filter(c => c.deck === deck.name && c.zombie).length;
       const evalMode    = this._getEvalMode(deck.name);
@@ -898,8 +963,9 @@ class App {
       });
       item.querySelector(".deck-eval-checkbox").addEventListener("change", (e) => {
         this._setEvalMode(deck.name, e.target.checked ? "auto" : "self");
-        if (deck.name === this._currentDeck) {
-          // si estamos viendo Repasar ahora mismo, refresca para aplicar el nuevo modo
+        // Si estamos viendo Repasar en esta baraja (o en "Todas", que hereda
+        // el modo de la baraja de origen), refresca para aplicar el nuevo modo.
+        if (deck.name === this._currentDeck || this._isAllDeck()) {
           const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
           if (activeViewName === "review") this._renderReview();
         }
@@ -932,7 +998,7 @@ class App {
         await this._cardRepo.update(card);
       }
 
-      if (deck.name === this._currentDeck) {
+      if (deck.name === this._currentDeck || this._isAllDeck()) {
         this._session.updateCards(this._activeCardsInCurrentDeck());
         this._updateBadges();
       }
@@ -955,6 +1021,8 @@ class App {
 
     // Refrescar la vista activa
     const activeViewName = Object.entries(this.$views).find(([, el]) => !el.classList.contains("hidden"))?.[0];
+    // Si estaba abierta "Añadir" y se pasa a la baraja virtual, volver a Repasar.
+    if (activeViewName === "add" && this._isAllDeck()) { this._navigateTo("review"); return; }
     if (activeViewName === "review") this._renderReview();
     if (activeViewName === "edit") this._renderCardList();
     if (activeViewName === "histograma") this._renderHistogram();
@@ -965,6 +1033,10 @@ class App {
 
     if (!name) {
       this._showFeedback(this.$deckFeedback, "Escribe un nombre para la baraja.", "error");
+      return;
+    }
+    if (name.toLowerCase() === ALL_DECK_LABEL.toLowerCase()) {
+      this._showFeedback(this.$deckFeedback, `"${ALL_DECK_LABEL}" es un nombre reservado.`, "error");
       return;
     }
     if (this._decks.some(d => d.name.toLowerCase() === name.toLowerCase())) {
@@ -1008,13 +1080,15 @@ class App {
       this._cards = this._cards.filter(c => c.deck !== deck.name);
       this._decks = this._decks.filter(d => d.id !== deck.id);
 
+      // Si la baraja activa era la eliminada, o "Todas" deja de proceder
+      // (el usuario se queda con una sola baraja), se cambia a una válida.
       if (this._currentDeck === deck.name) {
         this._currentDeck = this._visibleDecks()[0]?.name ?? null;
         if (this._currentDeck) localStorage.setItem(LS_CURRENT_DECK_KEY, this._currentDeck);
-        this._refreshDeckBar();
+      } else {
+        this._ensureVisibleDeck();
       }
-      this._session.updateCards(this._activeCardsInCurrentDeck());
-      this._updateBadges();
+      this._refreshAll();
       this._renderDeckList();
     } catch (err) {
       this._showFeedback(this.$deckFeedback, "Error al eliminar la baraja.", "error");
@@ -1063,7 +1137,8 @@ class App {
 
   _closeDeckUsersModal() {
     this.$deckUsersOverlay.classList.add("hidden");
-    // Si el usuario activo se quitó a sí mismo de la baraja actual:
+    // Si el usuario activo se quitó a sí mismo de la baraja actual (o "Todas"
+    // deja de proceder por quedarse con una sola baraja):
     if (this._ensureVisibleDeck()) this._refreshAll();
     this._renderDeckList();
   }
@@ -1100,13 +1175,18 @@ class App {
     this.$cardBackText.textContent  = card.back;
      this._renderProgressPie(card);
 
+    // En la baraja virtual, muestra la baraja de origen de la tarjeta
+    this.$cardDeckTag.textContent = card.deck;
+    this.$cardDeckTag.classList.toggle("hidden", !this._isAllDeck());
+
     // Colorea la tarjeta según la categoría que la ha originado
     this.$cardScene.classList.remove("card-ontime", "card-overdue", "card-new");
     this.$cardScene.classList.add(`card-${this._session.currentCategory}`);
 
     this.$cardScene.classList.remove("hidden");
 
-    const mode = this._getEvalMode(this._currentDeck);
+    // El modo se lee tras pick(): en "Todas" depende de la baraja de origen
+    const mode = this._currentEvalMode();
     this._evalEvaluated = false;
 
     if (mode === "auto") {
@@ -1374,7 +1454,7 @@ async _rateCard(success) {
       if (verticalDominant && -dy > VSWIPE_THRESHOLD) {
         this._repeatCard();
       } else if (!verticalDominant && Math.abs(dx) > SWIPE_THRESHOLD) {
-          const mode = this._getEvalMode(this._currentDeck);
+          const mode = this._currentEvalMode();
           if (mode === "auto") {
             if (dx > 0) this._advanceEvalReview(); // solo derecha avanza en modo auto
           } else {
@@ -1508,6 +1588,11 @@ async _addCard() {
     const back   = this.$addBack.value.trim();
     const double = this.$addDouble.checked;
 
+    if (this._isAllDeck()) {
+      this._showFeedback(this.$addFeedback, `No se pueden añadir tarjetas en "${ALL_DECK_LABEL}". Elige una baraja concreta.`, "error");
+      return;
+    }
+
     if (!front || !back) {
       this._showFeedback(this.$addFeedback, "Frente y dorso son obligatorios.", "error");
       return;
@@ -1575,6 +1660,11 @@ async _addCard() {
   }
 
   async _addBatch() {
+    if (this._isAllDeck()) {
+      this._showFeedback(this.$addBatchFeedback, `No se pueden añadir tarjetas en "${ALL_DECK_LABEL}". Elige una baraja concreta.`, "error");
+      return;
+    }
+
     const lines = this.$addBatchText.value
       .split("\n")
       .map(l => l.trim())
